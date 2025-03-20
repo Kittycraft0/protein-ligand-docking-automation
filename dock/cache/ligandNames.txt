@@ -1,1 +1,3 @@
-./dock/ligands/AAEAMN.xaa(1).pdbqt
+./dock/ligands/AAEAMN.xaa.pdbqt
+./dock/ligands/ligand_abscisic_acid.pdbqt
+./dock/ligands/ligand_biotin.pdbqt

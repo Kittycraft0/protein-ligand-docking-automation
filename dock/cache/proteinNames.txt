@@ -1,1 +1,2 @@
+./dock/proteins/1stp_DOCK.pdbqt
 ./dock/proteins/3k3k_DOCK.pdbqt

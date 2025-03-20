@@ -1,0 +1,18 @@
+find a tutorial that we know works already
+find something that would work when published
+
+find something I've wanted to study?
+
+
+compute root mean square relative to the ABA number
+aba number for that particular ligand
+compared to whatever i'm docking
+the ratio is used to compare ligand to protein a ligand to pritein b
+can compare them directly
+
+also compare distance to what ABA actually does
+like compare how distant to the score and screen out things that stick too well
+
+pick a system that is already been done
+
+.
