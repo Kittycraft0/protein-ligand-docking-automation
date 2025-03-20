@@ -38,12 +38,10 @@ initialize_cache() {
         exit 1
     fi
 
-    # Initialize progress cache if it doesn't exist
-    if [[ ! -f "$PROGRESS_CACHE" ]]; then
-        echo "LIGAND_INDEX=0" > "$PROGRESS_CACHE"
-        echo "MODEL_INDEX=0" >> "$PROGRESS_CACHE"
-        echo "PROTEIN_INDEX=0" >> "$PROGRESS_CACHE"
-    fi
+    # Initialize progress cache
+    echo "LIGAND_INDEX=0" > "$PROGRESS_CACHE"
+    echo "MODEL_INDEX=0" >> "$PROGRESS_CACHE"
+    echo "PROTEIN_INDEX=0" >> "$PROGRESS_CACHE"
 }
 
 # Function to read progress from cache
@@ -83,17 +81,26 @@ calculate_docking_box() {
 extract_models() {
     local ligand_file="$1"
     local ligand_name=$(basename "$ligand_file" .pdbqt)
+    local model_index=0
     local output_dir="$CACHE_DIR/models_$ligand_name"
     mkdir -p "$output_dir"
 
-    # Use vina_split to split the ligand file into multiple PDBQT files
-    vina_split --input "$ligand_file" --ligand "$output_dir/${ligand_name}_model"
-
-    # Rename the split files to follow the expected naming convention
-    for model_file in "$output_dir/${ligand_name}_model"*.pdbqt; do
-        model_index=$(basename "$model_file" | sed -E 's/.*_model([0-9]+)\.pdbqt/\1/')
-        mv "$model_file" "$output_dir/${ligand_name}_model_${model_index}.pdbqt"
-    done
+    awk -v output_dir="$output_dir" -v ligand_name="$ligand_name" '
+    /^MODEL/ {
+        model_index = $2
+        output_file = sprintf("%s/%s_model_%d.pdbqt", output_dir, ligand_name, model_index)
+        print > output_file
+        next
+    }
+    /^ENDMDL/ {
+        print >> output_file
+        close(output_file)
+        next
+    }
+    {
+        print >> output_file
+    }
+    ' "$ligand_file"
 }
 
 # Function to perform docking
@@ -121,7 +128,7 @@ perform_docking() {
               --size_y "$size_y" \
               --size_z "$size_z" \
               --out "$output_file"&>> "$log_file"; 
-    then
+              then
         echo "Error: Docking failed for $ligand_file with $protein_file. Check log file: $log_file"
         exit 1
     fi
