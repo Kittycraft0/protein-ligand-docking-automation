@@ -1,0 +1,4 @@
+# Ignore dock, test1, and vina_split_test folders
+dock/
+test1/
+vina_split_test/
