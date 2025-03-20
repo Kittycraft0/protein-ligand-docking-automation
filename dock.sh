@@ -22,6 +22,12 @@ initialize_cache() {
         mkdir -p "$CACHE_DIR/cache_backup"
         mv "$CACHE_DIR"/* "$CACHE_DIR/cache_backup/" 2>/dev/null
         echo "Cache cleared and backed up."
+    elif [[ "$1" == "clear-everything" ]]; then
+        rm -rf "$CACHE_DIR"
+        rm -rf "$RESULTS_DIR"
+        mkdir -p "$CACHE_DIR"
+        mkdir -p "$RESULTS_DIR"
+        echo "Cache and results cleared."
     fi
 
     mkdir -p "$CACHE_DIR"
@@ -82,18 +88,39 @@ calculate_docking_box() {
 # Function to extract models from ligand files
 extract_models() {
     local ligand_file="$1"
-    local ligand_name=$(basename "$ligand_file" .pdbqt)
+    ligand_name=$(basename "$ligand_file" .pdbqt)  # Remove 'local' to make it global
     local output_dir="$CACHE_DIR/models_$ligand_name"
     mkdir -p "$output_dir"
 
-    # Use vina_split to split the ligand file into multiple PDBQT files
-    vina_split --input "$ligand_file" --ligand "$output_dir/${ligand_name}_model"
+    # Check if the models are already extracted
+    if ls "$output_dir/${ligand_name}_model"*.pdbqt 1> /dev/null 2>&1; then
+        echo "Models for $ligand_name already extracted."
+        return
+    fi
 
-    # Rename the split files to follow the expected naming convention
-    for model_file in "$output_dir/${ligand_name}_model"*.pdbqt; do
-        model_index=$(basename "$model_file" | sed -E 's/.*_model([0-9]+)\.pdbqt/\1/')
-        mv "$model_file" "$output_dir/${ligand_name}_model_${model_index}.pdbqt"
-    done
+    # Check if the ligand file contains multiple models
+    if grep -q "MODEL" "$ligand_file"; then
+        # Use vina_split to split the ligand file into multiple PDBQT files
+        if ! vina_split --input "$ligand_file" --ligand "$output_dir/${ligand_name}_model"; then
+            echo "Error: Failed to split ligand file $ligand_file"
+            exit 1
+        fi
+
+        # Check if the output directory contains any split files
+        if [ ! "$(ls -A $output_dir)" ]; then
+            echo "Error: No models generated for ligand file $ligand_file"
+            exit 1
+        fi
+
+        # Rename the split files to follow the expected naming convention
+        for model_file in "$output_dir/${ligand_name}_model"*.pdbqt; do
+            model_index=$(basename "$model_file" | sed -E 's/.*_model([0-9]+)\.pdbqt/\1/')
+            mv "$model_file" "$output_dir/${ligand_name}_model_${model_index}.pdbqt"
+        done
+    else
+        # Copy the single model file to the output directory
+        cp "$ligand_file" "$output_dir/${ligand_name}_model_1.pdbqt"
+    fi
 }
 
 # Function to perform docking
@@ -101,15 +128,22 @@ perform_docking() {
     local ligand_file="$1"
     local protein_file="$2"
     local model_index="$3"
-    local ligand_name
-    local protein_name
-    ligand_name=$(basename "$ligand_file" .pdbqt)
-    protein_name=$(basename "$protein_file" .pdbqt)
+    ligand_name=$(basename "$ligand_file" .pdbqt)  # Remove 'local' to make it global
+    protein_name=$(basename "$protein_file" .pdbqt)  # Remove 'local' to make it global
     local output_file="$RESULTS_DIR/${ligand_name}_model${model_index}_vs_${protein_name}.pdbqt"
     local log_file="$RESULTS_DIR/${ligand_name}_model${model_index}_vs_${protein_name}.log"
 
     # Calculate docking box parameters
     read center_x center_y center_z size_x size_y size_z <<< $(calculate_docking_box "$protein_file")
+
+    # Debugging information
+    echo "Running AutoDock Vina with the following parameters:"
+    echo "Receptor: $protein_file"
+    echo "Ligand: $ligand_file"
+    echo "Center: $center_x, $center_y, $center_z"
+    echo "Size: $size_x, $size_y, $size_z"
+    echo "Output: $output_file"
+    echo "Log: $log_file"
 
     # Run AutoDock Vina
     if ! vina --receptor "$protein_file" \
@@ -120,8 +154,7 @@ perform_docking() {
               --size_x "$size_x" \
               --size_y "$size_y" \
               --size_z "$size_z" \
-              --out "$output_file"&>> "$log_file"; 
-    then
+              --out "$output_file" &>> "$log_file"; then
         echo "Error: Docking failed for $ligand_file with $protein_file. Check log file: $log_file"
         exit 1
     fi
@@ -129,16 +162,49 @@ perform_docking() {
 
 # Function to display progress
 display_progress() {
-    local total_ligands total_proteins
+    local total_ligands total_proteins total_models
     total_ligands=$(wc -l < "$LIGAND_NAMES")
     total_proteins=$(wc -l < "$PROTEIN_NAMES")
+    total_models=${#models[@]}
 
-    echo "Docking Progress:"
-    echo "Total ligands: $total_ligands"
-    echo "Total proteins: $total_proteins"
-    echo "Current ligand index: $LIGAND_INDEX"
-    echo "Current model index: $MODEL_INDEX"
-    echo "Current protein index: $PROTEIN_INDEX"
+    clear
+    echo "========================================"
+    echo "         Protein-Ligand Docking         "
+    echo "========================================"
+    echo
+    echo "Docking:"
+    echo "Total progress: ligand $((LIGAND_INDEX + 1))/$total_ligands"
+    echo -n "["
+    for ((i = 0; i < $(((LIGAND_INDEX + 1) * 20 / total_ligands)); i++)); do echo -n -e "\e[42m \e[0m"; done
+    for ((i = $(((LIGAND_INDEX + 1) * 20 / total_ligands)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
+    echo "]"
+    echo
+
+    echo "Ligand model: model $((MODEL_INDEX + 1))/$total_models"
+    echo -n "["
+    for ((i = 0; i < $(((MODEL_INDEX + 1) * 20 / total_models)); i++)); do echo -n -e "\e[42m \e[0m"; done
+    for ((i = $(((MODEL_INDEX + 1) * 20 / total_models)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
+    echo "]"
+    echo
+
+    echo "Ligand progress: protein $((PROTEIN_INDEX + 1))/$total_proteins"
+    echo -n "["
+    for ((i = 0; i < $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i++)); do echo -n -e "\e[42m \e[0m"; done
+    for ((i = $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
+    echo "]"
+    echo
+
+    echo "Ligand name: $ligand_name"
+    echo "Protein name: $protein_name"
+    local percent_through_dock=$(printf "%.8f" $(echo "scale=8; $current_task * 100 / $total_tasks" | bc))
+    echo "% through dock: $percent_through_dock%"
+    echo -n "["
+    for ((i = 0; i < $((current_task * 40 / total_tasks)); i++)); do echo -n -e "\e[42m \e[0m"; done
+    for ((i = $((current_task * 40 / total_tasks)); i < 40; i++)); do echo -n -e "\e[41m \e[0m"; done
+    echo "]"
+    echo
+    echo "Do CTRL+C to exit"
+    echo
 }
 
 # Function to handle termination signals
@@ -154,6 +220,8 @@ trap terminate_script SIGINT SIGTERM
 # Main script execution
 if [[ "$1" == "--clear-cache" ]]; then
     initialize_cache "clear"
+elif [[ "$1" == "--clear-everything" ]]; then
+    initialize_cache "clear-everything"
 else
     initialize_cache
 fi
@@ -166,15 +234,21 @@ proteins=($(cat "$PROTEIN_NAMES"))
 total_ligands=${#ligands[@]}
 total_proteins=${#proteins[@]}
 
-# Calculate total docking tasks
-total_tasks=$((total_ligands * total_proteins))
-current_task=1
+# Display initial progress
+display_progress
 
 while (( LIGAND_INDEX < total_ligands )); do
     ligand_file="${ligands[$LIGAND_INDEX]}"
     extract_models "$ligand_file"
     models=("$CACHE_DIR/models_$(basename "$ligand_file" .pdbqt)"/*.pdbqt)
     total_models=${#models[@]}
+
+    # Calculate total docking tasks
+    total_tasks=$((total_ligands * total_models * total_proteins))
+    current_task=$((LIGAND_INDEX * total_models * total_proteins + MODEL_INDEX * total_proteins + PROTEIN_INDEX + 1))
+
+    # Display progress before starting docking
+    display_progress
 
     while (( MODEL_INDEX < total_models )); do
         model_file="${models[$MODEL_INDEX]}"
@@ -186,13 +260,12 @@ while (( LIGAND_INDEX < total_ligands )); do
             perform_docking "$model_file" "$protein_file" "$MODEL_INDEX"
 
             # Display progress
-            echo "Task $current_task of $total_tasks completed."
-            ((current_task++))
+            display_progress
 
             # Update progress
+            ((current_task++))
             ((PROTEIN_INDEX++))
             update_progress
-            display_progress
         done
 
         PROTEIN_INDEX=0
