@@ -20,6 +20,9 @@ mkdir -p "$PROTEIN_DIR" "$LIGAND_DIR" "$CONFIG_DIR" "$CACHE_DIR" "$RESULTS_DIR" 
 # Initialize DEBUG variable
 DEBUG=0
 
+# Global variable to track if display_progress is rendering
+IS_RENDERING=false
+
 # Check for --debug flag
 for arg in "$@"; do
     if [[ "$arg" == "--debug" ]]; then
@@ -152,24 +155,163 @@ calculate_rms_relative_to_aba() {
     echo "$rms_relative_to_aba"
 }
 
-# Function to monitor the progress of the current docking process
+# Function to monitor the progress of the current docking process with a text-based progress bar
 monitor_docking_progress() {
     local log_file="$1"
+    local console_width=$(tput cols)
+    local progress_bar_length=$((console_width - 30))
     local progress=0
 
+    # Wait for the log file to be created
     while [[ ! -f "$log_file" ]]; do
         sleep 0.2  # Check every 0.2 seconds
     done
+    wait_for_render_stop
 
+    # Monitor the log file for progress updates
     while [[ $progress -lt 100 ]]; do
+        # Wait for rendering to stop
+        wait_for_render_stop
         if [[ -f "$log_file" ]]; then
-            progress=$(grep -oP '(?<=\|)[\*]{1,}' "$log_file" | wc -c)
-            progress=$((progress * 5))  # Each '*' represents 5% progress
-            echo -ne "Current docking progress: $progress%\r"
+            # Count the number of '*' characters in the log file to determine progress
+            progress=$(grep -o '*' "$log_file" | wc -l)
+            progress=$((progress * 2))  # Each '*' represents 2% progress
+
+            # Ensure progress does not exceed 100%
+            if ((progress > 100)); then
+                progress=100
+            fi
+
+            # Save the current cursor position
+            #tput sc
+
+            # Wait if display_progress is rendering
+            wait_for_render_stop
+
+            # Update the progress bar
+            tput cup 13 0  # Move cursor to the line where the progress bar is displayed
+            echo "Current docking progress: $progress%   " # Add spaces to clear previous output
+            drawProgressBar 14 0 "$progress_bar_length" "$progress" 100 true
+
+            # Restore the cursor position
+            #tput rc
         fi
+
         sleep 0.2  # Update display every 0.2 seconds
+        wait_for_render_stop
     done
-    echo -ne "Current docking progress: 100%\n"
+
+    # Ensure the progress bar is fully green at the end
+    tput sc
+    wait_for_render_stop
+    tput cup 13 0
+    echo "Current docking progress: 100%"
+    drawProgressBar 14 0 "$progress_bar_length" 100 100 true
+    tput rc
+}
+
+iiiiiiii=0
+
+# Function to draw a progress bar
+drawProgressBar() {
+    local row=$1         # Cursor row position for the progress bar
+    local col=$2         # Cursor column position for the progress bar
+    local length=$3      # Length of the progress bar
+    local current=$4     # Current index
+    local total=$5       # Total number of steps
+    local waits=${6:-false}  # Optional flag to wait after each character (default: false)
+
+    # Check if the current value exceeds the total value
+    if ((current > total)); then
+        # if this is is called then it is done with the current progress
+        # and the rendering of the rest of the screen may be being done
+        # so if wait is true then break out of the function
+        #if [[ "$waits" == true ]]; then
+            #return
+        #fi
+        # otherwise set current to total
+        current=$total
+    fi
+
+    # Check if the current value is negative
+    if ((current < 0)); then
+        current=0
+    fi
+
+    # Check if the progress bar length is valid
+    if ((length <= 0)); then
+        echo "Error: Progress bar length must be greater than 0."
+        return
+    fi
+
+    # Check if the current and total values are valid
+    if ((current < 0 || total < 0)); then
+        echo "Error: Progress bar current and total values must be non-negative, and total must be greater than 0."
+        return
+    fi
+
+    # Calculate progress as a fraction (0 to 1)
+    local progress=$(echo "scale=8; $current / $total" | bc)
+
+    # Calculate the number of filled and empty segments
+    local filled=$(printf "%.0f" "$(echo "$progress * $length" | bc)")
+    local empty=$((length - filled))
+
+    # Save the original cursor position
+    #tput sc
+
+    # Move the cursor to the progress bar position
+    tput cup "$row" "$col"
+
+    # Clear the entire line to prevent leftover characters
+    #printf '%*s' "$((length + 2))" " "  # Clear the line (progress bar + brackets)
+    #tput cup "$row" "$col"             # Move back to the start of the line
+
+    # Draw the progress bar
+    # Draw the opening bracket
+    echo -n "["
+    # if progress is greater than or equal to 100 then end function call
+    if [[ $current -ge $total ]]; then
+        return
+        #echo -n -e "\e[42m \e[0m"
+    fi
+    
+    # Draw filled segments (green)
+    for ((i = 0; i < filled; i++)); do
+        # Write the green segment
+        echo -n -e "\e[42m \e[0m"
+    done
+    # Draw empty segments (red)
+    for ((i = 0; i < empty; i++)); do
+        # Write the red segment
+        echo -n -e "\e[41m \e[0m"
+    done
+    # Draw the closing bracket
+    echo -n "]"
+    # Draw the percentage text
+    local percent=$(printf "%.2f" "$(echo "$progress * 100" | bc)")
+    echo -n " $percent%"
+    # Draw the current and total values
+    #echo -n " ($current/$total)"
+    # Draw the remaining space to fill the line
+    local remaining_space=$((length - filled - empty))
+    if ((remaining_space > 0)); then
+        # Fill the remaining space with spaces
+        printf '%*s' "$remaining_space" " "
+    fi
+
+    # Restore the original cursor position after finishing the progress bar
+    #tput rc
+}
+
+# Function to wait until IS_RENDERING is false
+wait_for_render_stop() {
+    if [[ $IS_RENDERING == false ]]; then
+        return  # No need to wait if rendering is not in progress
+    fi
+    while [[ $IS_RENDERING == true ]]; do
+        sleep 0.01  # Wait briefly for rendering to complete
+    done
 }
 
 # Function to perform docking asynchronously
@@ -245,60 +387,65 @@ perform_docking() {
 
 # Function to display progress
 display_progress() {
+    iiiiiiii=0
+    IS_RENDERING=true  # Indicate that rendering is in progress
+
+    clear_display_area  # Clear the display area before updating
+
+    local console_width=$(tput cols)
+    local progress_bar_length=$((console_width - 30))
+
     local total_ligands total_proteins total_models
     total_ligands=$(wc -l < "$LIGAND_NAMES")
     total_proteins=$(wc -l < "$PROTEIN_NAMES")
     total_models=${#models[@]}
 
-    # clear
+    tput cup 0 0 # Move cursor to the top left corner
     echo "========================================"
     echo "         Protein-Ligand Docking         "
     echo "========================================"
     echo
+    tput cup 3 0
     echo "Docking:"
-    echo "Total progress: ligand $((LIGAND_INDEX + 1))/$total_ligands"
-    echo -n "["
-    for ((i = 0; i < $(((LIGAND_INDEX + 1) * 20 / total_ligands)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $(((LIGAND_INDEX + 1) * 20 / total_ligands)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
-    echo
+    echo "Ligand file $((LIGAND_INDEX + 1))/$total_ligands"
+    drawProgressBar 5 0 "$progress_bar_length" $((LIGAND_INDEX + 1)) $total_ligands
 
+    tput cup 7 0
     echo "Ligand model: model $((MODEL_INDEX + 1))/$total_models"
-    echo -n "["
-    if (( total_models > 0 )); then
-        for ((i = 0; i < $(((MODEL_INDEX + 1) * 20 / total_models)); i++)); do echo -n -e "\e[42m \e[0m"; done
-        for ((i = $(((MODEL_INDEX + 1) * 20 / total_models)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    else
-        for ((i = 0; i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    fi
-    echo "]"
-    echo
+    drawProgressBar 8 0 "$progress_bar_length" $((MODEL_INDEX + 1)) $total_models
 
+    tput cup 10 0
     echo "Ligand progress: protein $((PROTEIN_INDEX + 1))/$total_proteins"
-    echo -n "["
-    for ((i = 0; i < $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
-    echo
+    drawProgressBar 11 0 "$progress_bar_length" $((PROTEIN_INDEX + 1)) $total_proteins
 
+    tput cup 21 0
     echo "Ligand name: $ligand_name"
     echo "Protein name: $protein_name"
-    local percent_through_dock=$(printf "%.8f" $(echo "scale=8; $current_task * 100 / $total_tasks" | bc))
-    echo "% through dock: $percent_through_dock%"
-    echo -n "["
-    for ((i = 0; i < $((current_task * 40 / total_tasks)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $((current_task * 40 / total_tasks)); i < 40; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
+
+    local percent_through_dock=$(printf "%.8f" "$(echo "scale=8; $current_task * 100 / $total_tasks" | bc)")
+    tput cup 23 0
+    echo "Total progress: $current_task/$total_tasks"
+    drawProgressBar 24 0 "$progress_bar_length" $current_task $total_tasks
+    
+    tput cup 25 0
     echo
     echo "Do CTRL+C to exit"
     echo
+
+    IS_RENDERING=false  # Indicate that rendering is complete
 }
 
 # Function to display progress for comparison ligands
 display_comparison_progress() {
+    IS_RENDERING=true  # Indicate that rendering is in progress
+    tput cup 0 0 # Move cursor to the top left corner
+    #clear_display_area  # Clear the display area before updating
+
     local total_comparison_ligands total_proteins
     total_comparison_ligands=$(wc -l < "$CACHE_DIR/comparisonLigandNames.txt")
     total_proteins=$(wc -l < "$PROTEIN_NAMES")
+    local console_width=$(tput cols)
+    local progress_bar_length=$((console_width - 30))
 
     echo "========================================"
     echo "   Initial Calculation of Comparison    "
@@ -306,30 +453,21 @@ display_comparison_progress() {
     echo
     echo "Docking:"
     echo "Total progress: comparison ligand $((COMPARISON_LIGAND_INDEX + 1))/$total_comparison_ligands"
-    echo -n "["
-    for ((i = 0; i < $(((COMPARISON_LIGAND_INDEX + 1) * 20 / total_comparison_ligands)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $(((COMPARISON_LIGAND_INDEX + 1) * 20 / total_comparison_ligands)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
-    echo
+    drawProgressBar 5 0 "$progress_bar_length" $((COMPARISON_LIGAND_INDEX + 1)) $total_comparison_ligands
 
     echo "Comparison ligand progress: protein $((PROTEIN_INDEX + 1))/$total_proteins"
-    echo -n "["
-    for ((i = 0; i < $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $(((PROTEIN_INDEX + 1) * 20 / total_proteins)); i < 20; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
-    echo
+    drawProgressBar 7 0 "$progress_bar_length" $((PROTEIN_INDEX + 1)) $total_proteins
 
     echo "Comparison ligand name: $comparison_ligand_name"
     echo "Protein name: $protein_name"
-    local percent_through_dock=$(printf "%.8f" $(echo "scale=8; $current_task * 100 / $total_tasks" | bc))
+    local percent_through_dock=$(printf "%.8f" "$(echo "scale=8; $current_task * 100 / $total_tasks" | bc)")
     echo "% through dock: $percent_through_dock%"
-    echo -n "["
-    for ((i = 0; i < $((current_task * 40 / total_tasks)); i++)); do echo -n -e "\e[42m \e[0m"; done
-    for ((i = $((current_task * 40 / total_tasks)); i < 40; i++)); do echo -n -e "\e[41m \e[0m"; done
-    echo "]"
+    drawProgressBar 10 0 "$progress_bar_length" $current_task $total_tasks
+
     echo
     echo "Do CTRL+C to exit"
     echo
+    IS_RENDERING=false  # Indicate that rendering is complete
 }
 
 # Function to handle termination signals
@@ -338,6 +476,22 @@ terminate_script() {
     update_progress
     exit 0
 }
+
+# Add empty lines to create space for display updates
+for ((i = 0; i < $(tput lines); i++)); do echo; done
+
+# Function to clear the display area
+clear_display_area() {
+    local console_height=$(tput lines)
+    local console_width=$(tput cols)
+    tput cup 0 0  # Move cursor to the top left corner
+    for ((i = 0; i < console_height; i++)); do
+        printf '%*s\n' "$console_width" ' '  # Clear the line up to the console width
+    done
+    tput cup 0 0  # Move cursor back to the top left corner
+}
+
+#clear_display_area
 
 # Trap SIGINT (Ctrl+C) and SIGTERM to execute terminate_script
 trap terminate_script SIGINT SIGTERM
@@ -377,6 +531,8 @@ for comparison_ligand_file in "${comparison_ligands[@]}"; do
     PROTEIN_INDEX=0
     ((COMPARISON_LIGAND_INDEX++))
 done
+
+clear_display_area
 
 # Perform docking for ligands
 while (( LIGAND_INDEX < total_ligands )); do
