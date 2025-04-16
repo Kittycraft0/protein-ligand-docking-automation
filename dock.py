@@ -30,6 +30,9 @@ for directory in [PROTEIN_DIR, LIGAND_DIR, CONFIG_DIR, CACHE_DIR, RESULTS_DIR, C
 # Initialize DEBUG variable
 DEBUG = "--debug" in os.sys.argv
 
+if DEBUG:
+    print("Debug mode enabled.")
+
 # Global variable to track if display_progress is rendering
 IS_RENDERING = False
 
@@ -50,9 +53,9 @@ def wait_for_render_stop():
 
 # Function to initialize or clear cache
 def initialize_cache(mode=None):
-    if DEBUG:
-        print("Debug mode enabled. Skipping cache and results clearing.")
-        return
+    #if DEBUG:
+    #    print("Debug mode enabled. Skipping cache and results clearing.")
+    #    return
 
     if mode == "clear":
         backup_dir = CACHE_DIR / "cache_backup"
@@ -236,7 +239,7 @@ def calculate_rms_relative_to_aba(aba_score, score):
     :param score: The docking score (float).
     :return: RMS relative to ABA (float).
     """
-    rms_relative_to_aba = math.sqrt((score - aba_score) ** 2)
+    rms_relative_to_aba = math.sqrt((score**2 - aba_score**2))
     return rms_relative_to_aba
 
 # Calculate RMS relative to comparison ligands
@@ -350,6 +353,8 @@ def perform_docking(ligand_file, protein_file, model_index):
 
     # Display the contents of the log file for debugging
     if DEBUG:
+        # move the cursor to the bottom left
+        move_cursor(shutil.get_terminal_size((80, 20)).lines - 1, 0)
         print(f"Contents of log file {log_file}:")
         with open(log_file, "r") as log:
             print(log.read())
@@ -360,17 +365,52 @@ def perform_docking(ligand_file, protein_file, model_index):
         for line in log:
             if line.startswith("   1"):  # Look for the first result line
                 score = line.split()[1]  # Extract the score
-                break
+                # does this work!?!?!?
+                # print(score)
+                # create file in RESULTS_DIR with the name of the ligand and protein
+                # and write the score to it
+                #with open(RESULTS_DIR / f"score_of_{ligand_name}_{protein_name}.txt", "w") as score_file:
+                #    score_file.write(f"{score}\n")
+                #break
+    # log the ligand, protein, model, etc. and score to the docking_log file
+    log_message(f"Docking completed for {ligand_name} with {protein_name}. Score: {score}")
 
-    if score and score.replace(".", "", 1).isdigit():  # Check if the score is a valid number
+    #if score and score.replace(".", "", 1).isdigit():  # Check if the score is a valid number
+    # Check if score is a valid number, accounting for negative values
+    # and decimal points
+    if score and (score.replace(".", "", 1).replace("-", "", 1).isdigit() or score == "-"):
+        # log that score is a valid number
+        log_message(f"   Valid score extracted: {score} for ligand: {ligand_name} with protein: {protein_name}")
         if DEBUG:
             print(f"Extracted score: {score} for ligand: {ligand_name} with protein: {protein_name}")
-        scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
+        # set the scores file to be in the scores dir
+        # and named scores_<protein_name>.txt
+        # create a directory called scores in the results directory if it doesn't already exist
+        SCORES_DIR = RESULTS_DIR / "scores"
+        if not SCORES_DIR.exists():
+            SCORES_DIR.mkdir(parents=True, exist_ok=True)
+        # create the scores file in the scores directory
+        # and name it scores_<protein_name>.txt
+        # set the scores file to be in the scores directory
+        # and named scores_<protein_name>.txt
+        # create a file called scores_<protein_name>.txt in the scores directory
+        # and write the score to it
+        scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+        
+        
+        
+        #scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
+        # log the name of the scores file
+        log_message(f"   {scores_file}")
         with open(scores_file, "a") as f:
+            # write what is about to be written, but in the log file
+            log_message(f"   {score} {ligand_name}")
             f.write(f"{score} {ligand_name}\n")
         if DEBUG:
             print(f"Score stored in {scores_file}")
     else:
+        # log failure to extract a valid score
+        log_message(f"Failed to extract a valid score from log file: {log_file}")
         print(f"Failed to extract a valid score from log file: {log_file}")
 
 # Function to display progress
@@ -537,17 +577,25 @@ def move_temp_files():
     If a file with the same name already exists in the destination, rename the file being moved.
     """
     temp_dir = RESULTS_DIR / "temp"
+    # if it doesn't already exist, create a directory called docked_ligands in the results directory
+    # set variable DOCKED_LIGANDS_DIR to the docked_ligands directory
+    DOCKED_LIGANDS_DIR = RESULTS_DIR / "docked_ligands"
+    if not (RESULTS_DIR / "docked_ligands").exists():
+        # create the directory
+        print("Creating docked_ligands directory in results directory.")
+        (RESULTS_DIR / "docked_ligands").mkdir(parents=True, exist_ok=True)
+        
     for file in temp_dir.glob("*"):
-        destination = RESULTS_DIR / file.name
+        destination = DOCKED_LIGANDS_DIR / file.name
         if destination.exists():
             # Rename the file to avoid overwriting
             counter = 1
             new_name = f"{file.stem}_copy{counter}{file.suffix}"
-            new_destination = RESULTS_DIR / new_name
+            new_destination = DOCKED_LIGANDS_DIR / new_name
             while new_destination.exists():
                 counter += 1
                 new_name = f"{file.stem}_copy{counter}{file.suffix}"
-                new_destination = RESULTS_DIR / new_name
+                new_destination = DOCKED_LIGANDS_DIR / new_name
             destination = new_destination
         shutil.move(str(file), str(destination))
     print("Moved all temporary files to the results directory.")
@@ -558,12 +606,22 @@ def calculate_top_dockers(proteins):
     Sort and save the top dockers for each protein.
     :param proteins: List of protein file paths.
     """
+    # set a variable SCORES_DIR to the scores directory
+    SCORES_DIR = RESULTS_DIR / "scores"
+    # if it doesn't exist, create a scores directory in the results directory
+    if not (RESULTS_DIR / "scores").exists():
+        (RESULTS_DIR / "scores").mkdir(parents=True, exist_ok=True)
     for protein_file in proteins:
         protein_name = Path(protein_file).stem
-        scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
-        top_dockers_file = RESULTS_DIR / f"top_dockers_{protein_name}.txt"
+        scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+        top_dockers_file = SCORES_DIR / f"top_dockers_{protein_name}.txt"
 
+        log_message(f"Calculating top dockers for {protein_name}.")
+        # log the name of the scores file
+        log_message(f"Scores file: {scores_file}")
         if scores_file.exists():
+            # log scores_file name to log file
+            log_message(f"Sorting scores for {protein_name} from {scores_file}.")
             with open(scores_file, "r") as f:
                 sorted_scores = sorted(f.readlines(), key=lambda x: float(x.split()[0]))
             with open(top_dockers_file, "w") as f:
@@ -571,6 +629,28 @@ def calculate_top_dockers(proteins):
             print(f"Top dockers for {protein_name} saved to {top_dockers_file}.")
         else:
             print(f"No scores file found for protein: {protein_name}. Skipping sorting.")
+
+
+# create a log folder in the dock folder
+if not (BASE_DIR / "log").exists():
+    (BASE_DIR / "log").mkdir(parents=True, exist_ok=True)
+# create a log file in the log folder
+LOG_FILE = BASE_DIR / "log" / "docking_log.txt"
+# open the log file in append mode
+with open(LOG_FILE, "a") as log:
+    log.write("\n")
+    log.write(f"Docking log - Start time: {time.ctime(START_TIME)}\n")
+    log.write("========================================\n")
+
+# create a log function to log messages to the log file
+def log_message(message):
+    """
+    Log a message to the log file.
+    :param message: The message to log.
+    """
+    with open(LOG_FILE, "a") as log:
+        log.write(f"{time.ctime(time.time())}: {message}\n")
+        log.flush()  # Ensure the log is written immediately
 
 # Calculate the best ligands using RMS relative to comparison ligands
 def calculate_best_ligands(ligands, proteins, comparison_ligands):
@@ -618,6 +698,12 @@ def calculate_best_ligands(ligands, proteins, comparison_ligands):
                     if rms_relative_to_comparison > 0:
                         total_score += 1 / (rms_relative_to_comparison ** 2)
                         count += 1
+                    else:
+                        # log error
+                        log_message(
+                            f"Error: RMS relative to comparison ligands is zero or negative for {ligand_name} with {protein_name}.")
+                        print(f"Error: RMS relative to comparison ligands is zero or negative for {ligand_name} with {protein_name}.")
+
 
             if count > 0:
                 final_score = math.sqrt(count / total_score)
@@ -744,7 +830,8 @@ if __name__ == "__main__":
         })
 
     # Clear the display area after comparison ligand docking
-    clear_display_area()
+    if(not DEBUG):
+        clear_display_area()
 
     # start time for docking
     start_time = time.time()
@@ -838,3 +925,295 @@ if __name__ == "__main__":
 
     # Rank and display the best ligands
     rank_and_display_best_ligands()
+
+
+
+
+
+# scores:
+# i want... each time a score is calculated, i want to store it in a file called scores_<protein_name>.txt
+# and i want to store the scores in the format <score> <ligand_name> on each line
+# i want to store the scores in a directory called scores in the results directory
+# and i want to create the directory if it doesn't exist
+# i want to have the score inserted into the scores file such that it is sorted in ascending order
+# i want to have the scores file be created if it doesn't exist
+
+# later i want the the scores to be like... sorted according to their distance to each of the comparison ligands
+
+# and i want to have the scores compared to the comparison ligands be in a file called best_ligands.txt in the results directory
+# and i want to have the best ligands be sorted according to their distance to each of the comparison ligands
+# and i want to have the best ligands be in the format <score> <ligand_name> on each line
+# and i want to have the best ligands be sorted in ascending order
+
+
+
+# for each ligand, i want the root mean square of all of the distances it has to the comparison 
+# ligand for each protein to be the thing that it is sorted by in the comparison ligand's sorted score file.
+# and i want to have the best ligands be in the format <score> <ligand_name> on each line
+# and i want to have the best ligands be sorted in ascending order
+
+# to complete this, i must modify the calculate_best_ligands function to calculate the root mean square of all of the distances
+# for each ligand to the comparison ligands for each protein and store that in the best_ligands.txt file
+
+# i also must modify the calculate_rms_relative_to_comparison function to calculate the root mean square of all of the distances
+# for each ligand to the comparison ligands for each protein and store that in the best_ligands.txt file
+
+
+
+# file structure of program
+
+# or like... the scores thing
+
+# so the scores... so
+# they're calculated
+
+# and then once they're calculated
+# like you have for each comparison ligand, for each protein, there is a score
+# now you have calculated each ligand to each protein
+# so now for each of those scores you get to each protein, you need to calculate the distance or 
+# whatever to like that of each comparison ligand
+
+
+
+# process:::::::::
+
+# Comparison Ligands protien scores per ligand:
+# for each comparison ligand:
+#   for each protein:
+#       get score for that comparison ligand to that protein
+#       save the score in directory dock/results/scores/comparison_ligands in file scores_<comparison_ligand_name>.txt
+#       save the score in the format <score> <protein_name> on each line
+
+# Ligands protien scores per ligand:
+# for each ligand: 
+#   for each protein:
+#       get score for that ligand to that protein (score 1)
+#       for each comparison ligand with current protein:
+#           CompLigand[i]Protein[j] store comparisonLigandScore-ligandScore
+#           
+#           
+#           score for comparison ligand to current protein is already saved (score 2)
+#           calculate the distance between the two scores (score 1 and score 2)
+#           store the distance in a list for that comparison ligand
+#           
+#           store the scores in a list for that ligand
+#           store this score in a file called scores_<ligand_name>.txt in the dock/results/scores/ligands directory
+#           store the score in the format <score> <protein_name> on each line
+
+
+# for each ligand:
+#   fetch the ligand 
+#   for each comparison ligand:
+#       
+#       calculate the root mean square of the distances for each protein
+#       have that be the value that it is sorted by in the best_ligands.txt file
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ok no more autocomplete with AI, that's very distracting
+
+# desired results:
+# see how good a ligand is as a substitute for a comparison ligand
+# that is known by the root mean square of ligandScore-comparisonLigandScore for all proteins
+# so, calculate that with each ligand-comparisonLigand pair, and generate a scoreboard or whatever for each substitute ligand,
+# to find which ligands best work as substitutes for each comparisonLigand
+# also generate a unique scoreboard for each comparisonLigand-protein pair, 
+# such that it is shown which ligands are best as substitutes for a comparisonLigand for each individual protein, 
+# because that might be useful as well
+
+
+# so how will i do that?
+# since there will likely be less comparisonLigands than proteins, i will have folders for each comparisonLigand
+# that each contain all individual scores for each protein and the composite score using the RMS of the other files' data.
+# Each file will store data as <score-comparisonScore> <protein_name> on each line, sorted by magnitude of <score-comparisonScore>,
+# such that lower magnitudes are ranked as better, higher up in the list.
+
+# I have it ordered score-comparisonScore, so that if score is lower than comparisonScore, then the resulting value is negative, showing
+# that score is so much score below that of comparisonScore, and vice versa.
+
+# The file names for the scores file will have a consistent structure:
+# scores_<comparisonLigand_name>_<protein_name>.txt
+
+
+# For the actual docked ligand files, there will exist a docked_ligands folder in the results folder.
+# Inside of that folder, there will exist a subfolder for each docked ligand (yes, it could be hundreds or thousands of folders)
+# that is named docked_<ligand_name>
+# that will contain the .log and .pdbqt files for all proteins docked with that dedicated ligand.
+# The folder should also contain a scores file that details the specific ligand's final ranking in each of the scores files,
+# for each protein-comparisonLigand pair's score file and in each comparisonLigand_RMS score file.
+
+# If the ligand is actually one of several models of a greater ligand file, then store each model as a subfolder of a folder with the 
+# name of the overall as follows:
+#docked_ligands
+#   <ligand_name>
+#       <ligand_name1>
+#           ...
+#       <ligand_name2>
+#           ...
+#       <ligand_name3>
+#           ...
+#       <ligand_name4>
+#           ...
+#       ...
+
+# ex:
+#docked_ligands
+#   AAEAMN
+#       AAEAMN_model01
+#           ...
+#       AAEAMN_model02
+#           ...
+#       AAEAMN_model03
+#           ...
+#       AAEAMN_model04
+#           ...
+#       AAEAMN_model05
+#           ...
+#       ...
+
+# Make a similar system where like it makes a folder of folders whenever a model is encountered 
+# that would otherwise get a dedicated folder for all other systems here as well
+
+# also, have the program remove the weird .xaa thing and any other like extraneous file 
+# extensions maybe when naming folders and final files i think
+
+
+
+# <ligand#_name>_scores.txt should contain the following:
+#<comparisonLigand1_name>:
+#   RMS: <RMSOfScoresWithcomparisonLigand1> - #<rankOutOfTotalRMSWithcomparisonLigand1>
+#   <protein1_name>: <score-comparison1ScoreWithProtein1> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand1AndProtein1>
+#   <protein2_name>: <score-comparison1ScoreWithProtein2> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand1AndProtein2>
+#   <protein3_name>: <score-comparison1ScoreWithProtein3> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand1AndProtein3>
+#   <protein4_name>: <score-comparison1ScoreWithProtein4> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand1AndProtein4>
+#   <protein5_name>: <score-comparison1ScoreWithProtein5> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand1AndProtein5>
+#<comparisonLigand2_name>:
+#   RMS: <RMSOfScoresWithcomparisonLigand2> - #<rankOutOfTotalRMSWithcomparisonLigand2>
+#   <protein1_name>: <score-comparison2ScoreWithProtein1> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein1>
+#   <protein2_name>: <score-comparison2ScoreWithProtein2> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein2>
+#   <protein3_name>: <score-comparison2ScoreWithProtein3> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein3>
+#   <protein4_name>: <score-comparison2ScoreWithProtein4> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein4>
+#   <protein5_name>: <score-comparison2ScoreWithProtein5> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein5>
+
+#ex:
+#ligand_abscisic_acid:
+#   RMS: 2.3827
+#   1stp: 2.4121 - #47/107
+#   3k3k: -2.1353 - #41/107
+#ligand_biotin:
+#   RMS: 1.1415
+#   1stp: 1.0114 - #47/107
+#   3k3k: 1.1632 - #41/107
+
+
+# So, the file structure will be as follows:
+# dock
+#   results
+#       scores
+#           scores_<comparisonLigand1_name>_RMS.txt
+#           scores_<comparisonLigand2_name>_RMS.txt
+#           scores_<comparisonLigand1_name>
+#               scores_<comparisonLigand1_name>_in_<protein1_name>.txt
+#               scores_<comparisonLigand1_name>_in_<protein2_name>.txt
+#               scores_<comparisonLigand1_name>_in_<protein3_name>.txt
+#               scores_<comparisonLigand1_name>_in_<protein4_name>.txt
+#               scores_<comparisonLigand1_name>_in_<protein5_name>.txt
+#           scores_<comparisonLigand2_name>
+#               scores_<comparisonLigand2_name>_in_<protein1_name>.txt
+#               scores_<comparisonLigand2_name>_in_<protein2_name>.txt
+#               scores_<comparisonLigand2_name>_in_<protein3_name>.txt
+#               scores_<comparisonLigand2_name>_in_<protein4_name>.txt
+#               scores_<comparisonLigand2_name>_in_<protein5_name>.txt
+#       docked_ligands
+#           docked_<ligand1_name>
+#               <ligand1_name>_scores.txt
+#               <ligand1_name>_in_<protein1_name>.log
+#               <ligand1_name>_in_<protein1_name>.pdbqt
+#               <ligand1_name>_in_<protein2_name>.log
+#               <ligand1_name>_in_<protein2_name>.pdbqt
+#               <ligand1_name>_in_<protein3_name>.log
+#               <ligand1_name>_in_<protein3_name>.pdbqt
+#               <ligand1_name>_in_<protein4_name>.log
+#               <ligand1_name>_in_<protein4_name>.pdbqt
+#               <ligand1_name>_in_<protein5_name>.log
+#               <ligand1_name>_in_<protein5_name>.pdbqt
+#           docked_<ligand2_name>
+#               <ligand2_name>_scores.txt
+#               <ligand2_name>_in_<protein1_name>.log
+#               <ligand2_name>_in_<protein1_name>.pdbqt
+#               <ligand2_name>_in_<protein2_name>.log
+#               <ligand2_name>_in_<protein2_name>.pdbqt
+#               <ligand2_name>_in_<protein3_name>.log
+#               <ligand2_name>_in_<protein3_name>.pdbqt
+#               <ligand2_name>_in_<protein4_name>.log
+#               <ligand2_name>_in_<protein4_name>.pdbqt
+#               <ligand2_name>_in_<protein5_name>.log
+#               <ligand2_name>_in_<protein5_name>.pdbqt
+#           ...
+
+# ex:
+#dock
+#   results
+#       scores
+#           scores_ligand_abscisic_acid_RMS.txt
+#           scores_ligand_biotin_RMS.txt
+#           scores_ligand_abscisic_acid
+#               scores_ligand_abscisic_acid_in_1stp
+#               scores_ligand_abscisic_acid_in_3k3k
+#           scores_ligand_biotin
+#               scores_ligand_biotin_in_1stp
+#               scores_ligand_biotin_in_3k3k
+#       docked_ligands
+#           docked_biotin
+#               biotin_scores.txt
+#               biotin_in_1stp.log
+#               biotin_in_1stp.pdbqt
+#               biotin_in_3k3k.log
+#               biotin_in_3k3k.pdbqt
+#           docked_AAEAMN
+#               docked_AAEAMN_model01
+#                   AAEAMN_model01_scores.txt
+#                   AAEAMN_model01_in_1stp.log
+#                   AAEAMN_model01_in_1stp.pdbqt
+#                   AAEAMN_model01_in_3k3k.log
+#                   AAEAMN_model01_in_3k3k.pdbqt
+#               docked_AAEAMN_model02
+#                   AAEAMN_model02_scores.txt
+#                   AAEAMN_model02_in_1stp.log
+#                   AAEAMN_model02_in_1stp.pdbqt
+#                   AAEAMN_model02_in_3k3k.log
+#                   AAEAMN_model02_in_3k3k.pdbqt
+#               docked_AAEAMN_model03
+#                   AAEAMN_model03_scores.txt
+#                   AAEAMN_model03_in_1stp.log
+#                   AAEAMN_model03_in_1stp.pdbqt
+#                   AAEAMN_model03_in_3k3k.log
+#                   AAEAMN_model03_in_3k3k.pdbqt
+#               docked_AAEAMN_model04
+#                   AAEAMN_model04_scores.txt
+#                   AAEAMN_model04_in_1stp.log
+#                   AAEAMN_model04_in_1stp.pdbqt
+#                   AAEAMN_model04_in_3k3k.log
+#                   AAEAMN_model04_in_3k3k.pdbqt
+#               docked_AAEAMN_model05
+#                   AAEAMN_model05_scores.txt
+#                   AAEAMN_model05_in_1stp.log
+#                   AAEAMN_model05_in_1stp.pdbqt
+#                   AAEAMN_model05_in_3k3k.log
+#                   AAEAMN_model05_in_3k3k.pdbqt
+#               
+
+
+# Upon program completion, the top 5 ligands from each scores_<comparisonLigand#_name>_RMS.txt file will be displayed to the screen.
+
+

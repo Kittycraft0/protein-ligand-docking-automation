@@ -1,0 +1,98 @@
+file structure of program
+
+or like... the scores thing
+
+so the scores... so
+they're calculated
+
+and then once they're calculated
+like you have for each comparison ligand, for each protein, there is a score
+now you have calculated each ligand to each protein
+so now for each of those scores you get to each protein, you need to calculate the distance or 
+whatever to like that of each comparison ligand
+
+
+
+...
+
+.
+.
+.
+
+
+...
+
+
+.
+
+
+
+for each 
+
+
+
+...
+
+
+# for each ligand: 
+#   for each protein:
+#       get score for that ligand to that protein (score 1)
+#       for each comparison ligand:
+#           score for comparison ligand to current protein is already saved (score 2)
+#           calculate the distance between the two scores (score 1 and score 2)
+#           if the distance is not zero:
+#           if the distance is not negative:
+#               if the distance is not positive:
+#                   if the distance is not infinite:
+#           if the distance is not NaN:
+#           if the distance is not undefined:
+#           if the distance is not null:
+#           if the distance is not empty:
+#           if the distance is not blank:
+#           if the distance is not whitespace:
+#           if the distance is not a string:
+#           if the distance is not a list:
+#           if the distance is not a tuple:
+#           if the distance is not a dictionary:
+#           if the distance is not a set:
+#           if the distance is not a frozenset:
+#           if the distance is not a bytearray:
+#           if the distance is not a bytes:
+#           if the distance is not a memoryview:
+#           if the distance is not a complex:
+#           if the distance is not a decimal:
+#           if the distance is not a fraction:
+#           if the distance is not a range:
+#           if the distance is not a slice:
+#           if the distance is not a generator:
+#           if the distance is not an iterator:
+#           if the distance is not an iterable:
+#           if the distance is not an async iterable:
+#           if the distance is not an async iterator:
+#           if the distance is not an async generator:
+#           if the distance is not an async function:
+#           if the distance is not an async method:
+#           if the distance is not an async context manager:
+#           if the distance is not an async with statement:
+#           if the distance is not an async for statement:
+#           if the distance is not an async for loop:
+#           if the distance is not an async for comprehension:
+#           if the distance is not an async for generator:
+#           if the distance is not an async for iterator:
+#           if the distance is not an async for iterable:
+#           if the distance is not an async for async iterable:
+#           if the distance is not an async for async iterator:
+#           if the distance is not an async for async generator:
+#           if the distance is not an async for async function:
+#           if the distance is not an async for async method:
+#           if the distance is not an async for async context manager:
+#           if the distance is not an async for async with statement:
+#           if the distance is not an async for async for statement:
+#           if the distance is not an async for async for loop:
+#           if the distance is not an async for async for comprehension:
+#           if the distance is not an async for async for generator:
+#           if the distance is not an async for async for iterator:
+#           if the distance is not an async for async for iterable:
+#           then:
+#           calculate the distance between the two scores (score 1 and score 2)
+#           if the distance is not zero:

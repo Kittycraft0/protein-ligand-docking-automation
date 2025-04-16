@@ -1,2 +1,3 @@
+dock\ligands\AAEAMN.xaa.pdbqt
 dock\ligands\ligand_abscisic_acid.pdbqt
 dock\ligands\ligand_biotin.pdbqt
