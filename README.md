@@ -1,75 +1,140 @@
 # Protein-Ligand Docking Automation
 
-This project automates the process of protein-ligand docking using [AutoDock Vina](https://github.com/ccsb-scripps/AutoDock-Vina). It facilitates batch processing of multiple protein and ligand files, ensuring progress is saved after each docking operation and allowing the process to resume seamlessly after interruptions.
+This project automates protein-ligand docking using [AutoDock Vina](https://github.com/ccsb-scripps/AutoDock-Vina), organizing results and generating comprehensive score and ranking files for analysis. Progress is saved after each docking operation, allowing seamless resumption after interruptions.
 
-I wrote up what I wanted the program to do, but I mostly had AI write everything. Including this entire readme, except for this line.
+---
 
 ## Features
 
-- **Automated Docking:** Sequentially docks multiple ligands to multiple proteins without manual intervention.
-- **Progress Persistence:** Saves progress after each docking operation, enabling resumption from the last successful step after interruptions.
-- **Dynamic Configuration:** Allows customization of docking parameters through a configuration file.
-- **Comprehensive Logging:** Provides detailed logs for each docking operation, facilitating easy monitoring and debugging.
+- **Automated Docking:** Batch docking of multiple ligands to multiple proteins.
+- **Progress Persistence:** Resume from last successful step after interruptions.
+- **Dynamic Configuration:** Customize docking parameters via a config file.
+- **Comprehensive Logging:** Detailed logs for each docking operation.
+- **Structured Results:** Output files and folders organized for easy analysis.
+
+---
 
 ## Prerequisites
 
-- **AutoDock Vina:** Ensure that [AutoDock Vina](https://github.com/ccsb-scripps/AutoDock-Vina) is installed and accessible in your system's PATH.
-- **Bash Shell:** The automation script is written in Bash; a Unix-like environment is required.
+- **AutoDock Vina:** [Download and install](https://github.com/ccsb-scripps/AutoDock-Vina).
+- **Python 3.7+**
+- **Windows or Unix-like environment**
+
+---
 
 ## Setup
 
 1. **Clone the Repository:**
-
    ```bash
    git clone https://github.com/yourusername/protein-ligand-docking-automation.git
    cd protein-ligand-docking-automation
-Prepare Protein Files:
+   ```
 
-Download protein structures and prepare them using ChimeraX.
-Identify and log docking zones for each protein.
-Convert protein files to .pdbqt format and place them in the proteins directory.
-Prepare Ligand Files:
+2. **Prepare Input Files:**
+   - Place `.pdbqt` protein files in `dock/proteins/`
+   - Place `.pdbqt` ligand files in `dock/ligands/`
+   - Place `.pdbqt` comparison ligand files in `dock/comparison_ligands/`
 
-Download ligand libraries from the ZINC Database.
-Extract and convert ligand files to .pdbqt format, placing them in the ligands directory.
-Configure Docking Parameters:
+3. **Configure Docking Parameters:**
+   - Edit `dock/config/config.txt` to set Vina parameters (see below).
 
-Edit the config/vina_config.txt file to set desired docking parameters.
-Usage
-Run the Automation Script:
+---
 
-bash
-Copy
-Edit
-./dock_automation.sh
-Monitor Progress:
+## Folder Structure
 
-The script displays real-time progress, including:
+```
+dock/
+  config/
+    config.txt           # Docking parameters
+  proteins/              # Protein .pdbqt files
+  ligands/               # Ligand .pdbqt files
+  comparison_ligands/    # Comparison ligand .pdbqt files
+  cache/                 # Internal cache files
+  results/
+    scores/
+      scores_<protein_name>.txt                # Scores for each protein
+      scores_<comparisonLigand_name>_RMS.txt   # RMS scores for each comparison ligand
+      scores_<comparisonLigand_name>/
+        scores_<comparisonLigand_name>_in_<protein_name>.txt
+      scores_proteins/
+        scores_<protein_name>/
+          scores_<protein_name>_unsorted.txt
+          scores_<protein_name>_sorted.txt
+    docked_ligands/
+      docked_<ligand_name>/
+        <ligand_name>_scores.txt
+        <ligand_name>_in_<protein_name>.log
+        <ligand_name>_in_<protein_name>.pdbqt
+      docked_<ligand_name>_modelXX/
+        ...
+  log/
+    docking_log.txt      # Log of all docking runs
+```
 
-Total progress across all ligands and proteins.
-Progress of the current ligand being processed.
-Progress of the current docking operation between a ligand and a protein.
-Handling Interruptions:
+---
 
-In case of interruptions (e.g., system shutdowns), simply rerun the script. It will resume from the last saved progress point.
+## Configuration
 
-Results
-Docking results are saved in the results directory, organized by protein and ligand names. Each result includes:
+Edit `dock/config/config.txt` to set Vina parameters:
 
-Docked Structures: Output files in .pdbqt format.
-Logs: Detailed logs of each docking operation for review.
-License
-This project is licensed under the MIT License.
+- `cpu`: Number of CPU threads to use (e.g., 8)
+- `exhaustiveness`: Search exhaustiveness (higher = more accurate, slower)
+- `energy_range`: Energy range for output modes
+- `num_modes`: Number of binding modes to generate
 
-Acknowledgements
-AutoDock Vina for the docking engine.
-ChimeraX for protein preparation.
-ZINC Database for ligand libraries.
-pgsql
-Copy
-Edit
+Example:
+```
+cpu=8
+exhaustiveness=16
+energy_range=4
+num_modes=9
+```
 
+---
 
-This `README.md` provides a comprehensive overview of the project, guiding users through setup, usage, and understanding the results. It ensures that users with the necessary prerequisites can effectively utilize the automation script for protein-ligand docking tasks.
-::contentReference[oaicite:0]{index=0}
- 
+## Output Files
+
+- **scores_<protein_name>.txt**: Scores for all ligands docked to a protein.
+- **scores_<comparisonLigand_name>_RMS.txt**: RMS of score differences for each ligand vs. a comparison ligand.
+- **scores_<comparisonLigand_name>/scores_<comparisonLigand_name>_in_<protein_name>.txt**: Score differences for each ligand vs. a comparison ligand for a specific protein.
+- **scores_proteins/scores_<protein_name>_unsorted.txt**: Unsorted scores for a protein.
+- **scores_proteins/scores_<protein_name>_sorted.txt**: Sorted scores for a protein.
+- **docked_ligands/docked_<ligand_name>/**: Contains all docking result files and a summary for each ligand.
+
+---
+
+## Log Files
+
+- **log/docking_log.txt**: Chronological log of all docking runs, errors, and events.
+
+---
+
+## Additional Data & Recommendations
+
+- **Docking parameters** for each run are stored in logs or as metadata.
+- **Timestamps** for each docking operation are logged.
+- **Failed docking attempts** are recorded in `docking_log.txt`.
+- **Summary statistics** (mean, median, stddev) for each ligand/protein/comparison ligand can be generated from scores.
+- **README** (this file) describes the structure and usage.
+- **Consider adding:**  
+  - Per-ligand/protein statistics files  
+  - A summary file listing all ligands, proteins, and comparison ligands used  
+  - A metadata file for each docking run with parameters and environment info
+
+---
+
+## Usage
+
+1. Place your protein, ligand, and comparison ligand `.pdbqt` files in their respective folders.
+2. Edit `config/config.txt` as needed.
+3. Run the script:
+   ```bash
+   python dock.py
+   ```
+4. Results will appear in the `results/` folder.
+
+---
+
+## Contact
+
+For questions or issues, contact [iwbmo05@gmail.com](mailto:iwbmo05@gmail.com) or iwbmo on Discord.
