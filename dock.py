@@ -7,6 +7,7 @@ import signal
 from pathlib import Path
 from time import sleep
 from collections import deque
+import statistics
 
 # Directory paths
 BASE_DIR = Path("./dock")
@@ -41,6 +42,9 @@ START_TIME = time.time()
 
 # Global variable to track task durations
 TASK_DURATIONS = deque(maxlen=10)  # Store durations for the last 10 tasks
+
+# Global variable to track failed docking attempts
+FAILED_DOCKINGS = []
 
 # Function to wait until IS_RENDERING is false
 def wait_for_render_stop():
@@ -303,6 +307,7 @@ def monitor_docking_progress(log_file):
 
 # Function to perform docking asynchronously
 CONFIG = read_config()
+validate_and_report_config(CONFIG)
 
 def perform_docking(ligand_file, protein_file, model_index):
     """
@@ -367,7 +372,8 @@ def perform_docking(ligand_file, protein_file, model_index):
     # Check if the log file was created
     if not log_file.exists():
         print(f"Error: Log file not found: {log_file}")
-        exit(1)
+        FAILED_DOCKINGS.append((ligand_name, protein_name))
+        return
 
     # Display the contents of the log file for debugging
     if DEBUG:
@@ -402,12 +408,16 @@ def perform_docking(ligand_file, protein_file, model_index):
                 f.write(header)
         with open(scores_file, "a") as f:
             f.write(f"{score} {ligand_name}\n")
+        update_sorted_scores(scores_file)
+        write_stats(scores_file)
+        write_scores_csv(scores_file)
         if DEBUG:
             print(f"Score stored in {scores_file}")
     else:
         # log failure to extract a valid score
         log_message(f"Failed to extract a valid score from log file: {log_file}")
         print(f"Failed to extract a valid score from log file: {log_file}")
+        FAILED_DOCKINGS.append((ligand_name, protein_name))
 
     ligand_name = Path(ligand_file).stem.split(".")[0]
     model_part = ""
@@ -419,6 +429,10 @@ def perform_docking(ligand_file, protein_file, model_index):
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(str(output_file), dest_dir / output_file.name)
     shutil.move(str(log_file), dest_dir / log_file.name)
+
+    # Write metadata
+    env_info = f"Python version: {sys.version}"
+    write_metadata(dest_dir, vina_command, env_info)
 
 # Function to display progress
 def display_progress(current_task, total_tasks, ligand_index, total_ligands, model_index, total_models, protein_index, total_proteins, ligand_name, protein_name):
@@ -575,6 +589,7 @@ def terminate_script(signal_received, frame):
         "PROTEIN_INDEX": PROTEIN_INDEX
     }
     update_progress(progress)
+    write_failed_docking_summary()
     exit(0)
 
 # Move all .log and .pdbqt files to the dedicated subfolder
@@ -634,6 +649,8 @@ def calculate_top_dockers(proteins):
             with open(top_dockers_file, "w") as f:
                 f.write("# Score  Ligand\n")
                 f.writelines(sorted_scores)
+            write_stats(scores_file)
+            write_scores_csv(scores_file)
             print(f"Top dockers for {protein_name} saved to {top_dockers_file}.")
         else:
             print(f"No scores file found for protein: {protein_name}. Skipping sorting.")
@@ -859,6 +876,197 @@ def read_config(config_path=CONFIG_DIR / "config.txt"):
                 config[key.strip()] = value.strip()
     return config
 
+def validate_and_report_config(config, expected_keys=None):
+    if expected_keys is None:
+        expected_keys = ["cpu", "exhaustiveness", "energy_range", "num_modes"]
+    print("Configuration loaded:")
+    for key in expected_keys:
+        if key in config:
+            print(f"  {key}: {config[key]}")
+        else:
+            print(f"  WARNING: {key} not set in config file!")
+
+def clean_ligand_name(name):
+    return name.split(".")[0].replace(" ", "_")
+
+def update_sorted_scores(scores_file):
+    with open(scores_file, "r") as f:
+        lines = [line for line in f if not line.startswith("#")]
+    sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]))
+    with open(scores_file, "w") as f:
+        f.write("# Score  Ligand\n")
+        f.writelines(sorted_lines)
+
+def write_stats(scores_file):
+    with open(scores_file) as f:
+        scores = [float(line.split()[0]) for line in f if not line.startswith("#")]
+    if scores:
+        mean = statistics.mean(scores)
+        median = statistics.median(scores)
+        stdev = statistics.stdev(scores) if len(scores) > 1 else 0
+        stats_file = scores_file.parent / (scores_file.stem + "_stats.txt")
+        with open(stats_file, "w") as f:
+            f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
+
+def write_metadata(dest_dir, vina_command, env_info):
+    with open(dest_dir / "metadata.txt", "w") as f:
+        f.write("Vina command:\n")
+        f.write(" ".join(vina_command) + "\n")
+        f.write("Environment:\n")
+        f.write(env_info + "\n")
+
+def write_ligand_stats(ligand_file, proteins):
+    ligand_name = Path(ligand_file).stem
+    scores = []
+    for protein_file in proteins:
+        protein_name = Path(protein_file).stem
+        scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
+        if scores_file.exists():
+            with open(scores_file) as f:
+                for line in f:
+                    if line.startswith("#"): continue
+                    if ligand_name in line:
+                        scores.append(float(line.split()[0]))
+                        break
+    if scores:
+        mean = statistics.mean(scores)
+        median = statistics.median(scores)
+        stdev = statistics.stdev(scores) if len(scores) > 1 else 0
+        stats_file = RESULTS_DIR / "scores" / "ligands" / f"{ligand_name}_stats.txt"
+        stats_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(stats_file, "w") as f:
+            f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
+
+def write_ligand_protein_scores(ligands, proteins):
+    SCORES_DIR = RESULTS_DIR / "scores" / "ligands"
+    SCORES_DIR.mkdir(parents=True, exist_ok=True)
+    for ligand_file in ligands:
+        ligand_name = Path(ligand_file).stem
+        out_file = SCORES_DIR / f"scores_{ligand_name}.txt"
+        with open(out_file, "w") as f:
+            f.write("# Score  Protein\n")
+            for protein_file in proteins:
+                protein_name = Path(protein_file).stem
+                scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
+                score = None
+                if scores_file.exists():
+                    with open(scores_file) as sf:
+                        for line in sf:
+                            if line.startswith("#"): continue
+                            if ligand_name in line:
+                                score = line.split()[0]
+                                break
+                if score is not None:
+                    f.write(f"{score} {protein_name}\n")
+
+def write_comparison_ligand_protein_scores(comparison_ligands, proteins):
+    SCORES_DIR = RESULTS_DIR / "scores" / "comparison_ligands"
+    SCORES_DIR.mkdir(parents=True, exist_ok=True)
+    for comp_lig_file in comparison_ligands:
+        comp_lig_name = Path(comp_lig_file).stem
+        out_file = SCORES_DIR / f"scores_{comp_lig_name}.txt"
+        with open(out_file, "w") as f:
+            f.write("# Score  Protein\n")
+            for protein_file in proteins:
+                protein_name = Path(protein_file).stem
+                scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
+                score = None
+                if scores_file.exists():
+                    with open(scores_file) as sf:
+                        for line in sf:
+                            if line.startswith("#"): continue
+                            if comp_lig_name in line:
+                                score = line.split()[0]
+                                break
+                if score is not None:
+                    f.write(f"{score} {protein_name}\n")
+
+def write_summary_file(ligands, proteins, comparison_ligands):
+    summary_file = RESULTS_DIR / "summary.txt"
+    with open(summary_file, "w") as f:
+        f.write("Ligands:\n")
+        for ligand in ligands:
+            f.write(f"  {Path(ligand).stem}\n")
+        f.write("\nProteins:\n")
+        for protein in proteins:
+            f.write(f"  {Path(protein).stem}\n")
+        f.write("\nComparison Ligands:\n")
+        for comp in comparison_ligands:
+            f.write(f"  {Path(comp).stem}\n")
+
+def write_per_protein_comparison_ligand_rankings(ligands, proteins, comparison_ligands):
+    SCORES_DIR = RESULTS_DIR / "scores"
+    for comp_lig_file in comparison_ligands:
+        comp_lig_name = Path(comp_lig_file).stem
+        for protein_file in proteins:
+            protein_name = Path(protein_file).stem
+            scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+            comp_score = None
+            if not scores_file.exists():
+                continue
+            with open(scores_file) as f:
+                for line in f:
+                    if line.startswith("#"): continue
+                    if comp_lig_name in line:
+                        comp_score = float(line.split()[0])
+                        break
+            if comp_score is None:
+                continue
+            diffs = []
+            with open(scores_file) as f:
+                for line in f:
+                    if line.startswith("#"): continue
+                    score, lig_name = line.split()
+                    diff = float(score) - comp_score
+                    diffs.append((abs(diff), diff, lig_name))
+            diffs.sort()
+            ranked_file = SCORES_DIR / f"scores_{comp_lig_name}_in_{protein_name}_ranked.txt"
+            with open(ranked_file, "w") as f:
+                f.write(f"# Generated: {time.ctime()}\n")
+                f.write("# ScoreDiff  Ligand\n")
+                for _, diff, lig_name in diffs:
+                    f.write(f"{diff:.4f} {lig_name}\n")
+
+def write_ligand_rms_to_comparison(ligands, proteins, comparison_ligands):
+    SCORES_DIR = RESULTS_DIR / "scores"
+    OUT_DIR = SCORES_DIR / "ligands"
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for ligand_file in ligands:
+        ligand_name = Path(ligand_file).stem
+        out_file = OUT_DIR / f"{ligand_name}_RMS_to_comparison_ligands.txt"
+        with open(out_file, "w") as f:
+            f.write(f"# Generated: {time.ctime()}\n")
+            f.write("# ComparisonLigand  RMS\n")
+            for comp_lig_file in comparison_ligands:
+                comp_lig_name = Path(comp_lig_file).stem
+                rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
+                rms_value = None
+                if rms_file.exists():
+                    with open(rms_file) as rf:
+                        for line in rf:
+                            if line.startswith("#"): continue
+                            if ligand_name in line:
+                                rms_value = float(line.split()[0])
+                                break
+                if rms_value is not None:
+                    f.write(f"{comp_lig_name} {rms_value:.4f}\n")
+
+def write_failed_docking_summary():
+    out_file = RESULTS_DIR / "failed_docking_attempts.txt"
+    with open(out_file, "w") as f:
+        f.write(f"# Generated: {time.ctime()}\n")
+        f.write("# Ligand  Protein\n")
+        for ligand, protein in FAILED_DOCKINGS:
+            f.write(f"{ligand} {protein}\n")
+
+def write_scores_csv(scores_file):
+    csv_file = scores_file.with_suffix('.csv')
+    with open(scores_file) as fin, open(csv_file, "w") as fout:
+        fout.write("Score,Ligand\n")
+        for line in fin:
+            if line.startswith("#"): continue
+            fout.write(",".join(line.strip().split()) + "\n")
+
 # Main script execution
 if __name__ == "__main__":
     import sys
@@ -1055,6 +1263,33 @@ if __name__ == "__main__":
     # Generate per-ligand/model score summaries
     generate_ligand_score_summaries(ligands, proteins, comparison_ligands)
 
+    # Write ligand-protein scores
+    write_ligand_protein_scores(ligands, proteins)
+
+    # Write comparison ligand-protein scores
+    write_comparison_ligand_protein_scores(comparison_ligands, proteins)
+
+    # Write summary file
+    write_summary_file(ligands, proteins, comparison_ligands)
+
+    # Write per-protein comparison ligand rankings
+    write_per_protein_comparison_ligand_rankings(ligands, proteins, comparison_ligands)
+
+    # Write RMS to comparison ligands for each ligand
+    write_ligand_rms_to_comparison(ligands, proteins, comparison_ligands)
+
+    for ligand_file in ligands:
+        write_ligand_stats(ligand_file, proteins)
+
+    # Write failed docking summary
+    write_failed_docking_summary()
+
+    # Write CSVs for all scores_<protein_name>.txt files
+    for protein_file in proteins:
+        protein_name = Path(protein_file).stem
+        scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
+        if scores_file.exists():
+            write_scores_csv(scores_file)
 
 print("End of program")
 
@@ -1236,20 +1471,6 @@ print("End of program")
 #<comparisonLigand2_name>:
 #   RMS: <RMSOfScoresWithcomparisonLigand2> - #<rankOutOfTotalRMSWithcomparisonLigand2>
 #   <protein1_name>: <score-comparison2ScoreWithProtein1> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein1>
-#   <protein2_name>: <score-comparison2ScoreWithProtein2> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein2>
-#   <protein3_name>: <score-comparison2ScoreWithProtein3> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein3>
-#   <protein4_name>: <score-comparison2ScoreWithProtein4> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein4>
-#   <protein5_name>: <score-comparison2ScoreWithProtein5> - #<rankOfLigand#OutOfTotalScoresWithcomparisonLigand2AndProtein5>
-
-#ex:
-#ligand_abscisic_acid:
-#   RMS: 2.3827
-#   1stp: 2.4121 - #47/107
-#   3k3k: -2.1353 - #41/107
-#ligand_biotin:
-#   RMS: 1.1415
-#   1stp: 1.0114 - #47/107
-#   3k3k: 1.1632 - #41/107
 
 
 # So, the file structure will be as follows:
