@@ -2,3 +2,5 @@
 dock/
 test1/
 vina_split_test/
+dock/cache/
+dock/cache/progress_cache.txt
