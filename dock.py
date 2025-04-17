@@ -41,619 +41,557 @@ IS_RENDERING = False
 START_TIME = time.time()
 
 # Global variable to track task durations
-TASK_DURATIONS = deque(maxlen=10)  # Store durations for the last 10 tasks
+TASK_DURATIONS = deque(maxlen=30)  # Store durations for the last 30 tasks
 
 # Global variable to track failed docking attempts
 FAILED_DOCKINGS = []
 
-# Function to wait until IS_RENDERING is false
-def wait_for_render_stop():
-    """
-    Wait until the IS_RENDERING flag is set to False.
-    """
-    global IS_RENDERING
-    while IS_RENDERING:
-        time.sleep(0.01)  # Wait briefly for rendering to complete
+class CacheManager:
+    def __init__(self, cache_dir, results_dir, ligand_dir, protein_dir, comparison_ligand_dir):
+        self.cache_dir = cache_dir
+        self.results_dir = results_dir
+        self.ligand_dir = ligand_dir
+        self.protein_dir = protein_dir
+        self.comparison_ligand_dir = comparison_ligand_dir
 
-# Function to initialize or clear cache
-def initialize_cache(mode=None):
-    #if DEBUG:
-    #    print("Debug mode enabled. Skipping cache and results clearing.")
-    #    return
-
-    if mode == "clear":
-        backup_dir = CACHE_DIR / "cache_backup"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        for item in CACHE_DIR.iterdir():
-            # Skip the cache_backup directory itself
-            if item == backup_dir:
-                continue
-
-            destination = backup_dir / item.name
-            if destination.exists():
-                # Rename the file to avoid overwriting
-                counter = 1
-                new_name = f"{item.stem}_copy{counter}{item.suffix}"
-                new_destination = backup_dir / new_name
-                while new_destination.exists():
-                    counter += 1
+    def initialize_cache(self, mode=None):
+        if mode == "clear":
+            backup_dir = self.cache_dir / "cache_backup"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for item in self.cache_dir.iterdir():
+                if item == backup_dir:
+                    continue
+                destination = backup_dir / item.name
+                if destination.exists():
+                    counter = 1
                     new_name = f"{item.stem}_copy{counter}{item.suffix}"
                     new_destination = backup_dir / new_name
-                destination = new_destination
-            shutil.move(str(item), str(destination))
-        print("Cache cleared and backed up.")
-    elif mode == "clear-everything":
-        shutil.rmtree(CACHE_DIR, ignore_errors=True)
-        shutil.rmtree(RESULTS_DIR, ignore_errors=True)
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        print("Cache and results cleared.")
+                    while new_destination.exists():
+                        counter += 1
+                        new_name = f"{item.stem}_copy{counter}{item.suffix}"
+                        new_destination = backup_dir / new_name
+                    destination = new_destination
+                shutil.move(str(item), str(destination))
+            print("Cache cleared and backed up.")
+        elif mode == "clear-everything":
+            shutil.rmtree(self.cache_dir, ignore_errors=True)
+            shutil.rmtree(self.results_dir, ignore_errors=True)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+            print("Cache and results cleared.")
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate ligand and protein name lists
-    if not list(LIGAND_DIR.glob("*.pdbqt")):
-        print(f"Error: No ligand files found in {LIGAND_DIR}")
-        exit(1)
-    with open(LIGAND_NAMES, "w") as f:
-        f.writelines([str(file) + "\n" for file in LIGAND_DIR.glob("*.pdbqt")])
+        # Generate ligand and protein name lists
+        ligand_names = self.cache_dir / "ligandNames.txt"
+        protein_names = self.cache_dir / "proteinNames.txt"
+        comparison_ligand_names = self.cache_dir / "comparisonLigandNames.txt"
+        progress_cache = self.cache_dir / "progress_cache.txt"
 
-    if not list(PROTEIN_DIR.glob("*.pdbqt")):
-        print(f"Error: No protein files found in {PROTEIN_DIR}")
-        exit(1)
-    with open(PROTEIN_NAMES, "w") as f:
-        f.writelines([str(file) + "\n" for file in PROTEIN_DIR.glob("*.pdbqt")])
+        if not list(self.ligand_dir.glob("*.pdbqt")):
+            print(f"Error: No ligand files found in {self.ligand_dir}")
+            exit(1)
+        with open(ligand_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.ligand_dir.glob("*.pdbqt")])
 
-    # Generate comparison ligand name list
-    if not list(COMPARISON_LIGAND_DIR.glob("*.pdbqt")):
-        print(f"Error: No comparison ligand files found in {COMPARISON_LIGAND_DIR}")
-        exit(1)
-    with open(COMPARISON_LIGAND_NAMES, "w") as f:
-        f.writelines([str(file) + "\n" for file in COMPARISON_LIGAND_DIR.glob("*.pdbqt")])
+        if not list(self.protein_dir.glob("*.pdbqt")):
+            print(f"Error: No protein files found in {self.protein_dir}")
+            exit(1)
+        with open(protein_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.protein_dir.glob("*.pdbqt")])
 
-    # Initialize progress cache if it doesn't exist
-    if not PROGRESS_CACHE.exists():
-        with open(PROGRESS_CACHE, "w") as f:
-            f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
+        if not list(self.comparison_ligand_dir.glob("*.pdbqt")):
+            print(f"Error: No comparison ligand files found in {self.comparison_ligand_dir}")
+            exit(1)
+        with open(comparison_ligand_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.comparison_ligand_dir.glob("*.pdbqt")])
 
-# Function to read progress from cache
-def read_progress():
-    if PROGRESS_CACHE.exists():
-        progress = {}
-        with open(PROGRESS_CACHE) as f:
+        if not progress_cache.exists():
+            with open(progress_cache, "w") as f:
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
+
+
+class RMSCalculator:
+    @staticmethod
+    def calculate_rms_relative_to_aba(aba_score, score):
+        return math.sqrt((score**2 - aba_score**2))
+
+    @staticmethod
+    def calculate_rms_relative_to_comparison(score, comparison_scores):
+        if not comparison_scores:
+            return float("inf")
+        squared_differences = [(float(score) - float(c_score)) ** 2 for c_score in comparison_scores]
+        return math.sqrt(sum(squared_differences) / len(squared_differences))
+
+class DockingProgressMonitor:
+    def __init__(self, display_manager):
+        self.display_manager = display_manager
+
+    def monitor(self, log_file):
+        """
+        Monitor the docking progress by reading the log file and updating a text-based progress bar.
+        :param log_file: Path to the log file being monitored.
+        """
+        console_width = shutil.get_terminal_size((80, 20)).columns  # Get terminal width
+        progress_bar_length = console_width - 30  # Adjust progress bar length
+        progress = 0
+
+        # Wait for the log file to be created
+        while not Path(log_file).exists():
+            time.sleep(0.2)  # Check every 0.2 seconds
+
+        dock_progress_row = 15  # Row for the progress bar
+
+        # Monitor the log file for progress updates
+        while progress < 100:
+            if Path(log_file).exists():
+                # Count the number of '*' characters in the log file to determine progress
+                with open(log_file, "r") as f:
+                    progress = f.read().count("*") * 2  # Each '*' represents 2% progress
+
+                # Ensure progress does not exceed 100%
+                progress = min(progress, 100)
+
+                # Update the progress bar
+                self.display_manager.move_cursor(dock_progress_row, 0)
+                print(f"\rCurrent docking progress: {progress}%   ", end="")
+                self.display_manager.draw_progress_bar(dock_progress_row + 1, 0, progress_bar_length, progress, 100)
+
+            time.sleep(0.2)  # Update display every 0.2 seconds
+
+        # Ensure the progress bar is fully green at the end
+        self.display_manager.move_cursor(dock_progress_row, 0)
+        print("\nCurrent docking progress: 100%")
+        self.display_manager.draw_progress_bar(dock_progress_row + 1, 0, progress_bar_length, 100, 100)
+
+class DockingConfig:
+    def __init__(self, config_path):
+        self.config = self.read_config(config_path)
+        self.validate_and_report()
+
+    def read_config(self, config_path):
+        config = {}
+        if not Path(config_path).exists():
+            print(f"Warning: Config file {config_path} not found. Using defaults.")
+            return config
+        with open(config_path) as f:
             for line in f:
-                key, value = line.strip().split("=")
-                progress[key] = int(value)
-        return progress
-    else:
-        print("Error: Progress cache file not found.")
-        exit(1)
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    config[key.strip()] = value.strip()
+        return config
 
-# Function to update progress in cache
-def update_progress(progress):
-    with open(PROGRESS_CACHE, "w") as f:
-        for key, value in progress.items():
-            f.write(f"{key}={value}\n")
+    def validate_and_report(self):
+        expected_keys = ["cpu", "exhaustiveness", "energy_range", "num_modes"]
+        print("Configuration loaded:")
+        for key in expected_keys:
+            if key in self.config:
+                print(f"  {key}: {self.config[key]}")
+            else:
+                print(f"  WARNING: {key} not set in config file!")
 
-# Function to calculate docking box parameters
-def calculate_docking_box(protein_file):
-    center_x, center_y, center_z = 0, 0, 0
-    count = 0
-    with open(protein_file) as f:
-        for line in f:
-            if line.startswith("ATOM"):
-                parts = line.split()
-                center_x += float(parts[6])
-                center_y += float(parts[7])
-                center_z += float(parts[8])
-                count += 1
-    if count > 0:
-        center_x /= count
-        center_y /= count
-        center_z /= count
-    size_x, size_y, size_z = 20, 20, 20
-    return center_x, center_y, center_z, size_x, size_y, size_z
+class ScoreManager:
+    def __init__(self, results_dir):
+        self.results_dir = Path(results_dir)
+        self.scores_dir = self.results_dir / "scores"
 
-# Function to extract models from ligand files
-def extract_models(ligand_file):
-    ligand_name = Path(ligand_file).stem  # Extract the base name without extension
-    output_dir = CACHE_DIR / f"models_{ligand_name}"  # Output directory for models
-    output_dir.mkdir(parents=True, exist_ok=True)  # Create the directory if it doesn't exist
-
-    # Check if the models are already extracted
-    if list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
-        print(f"Models for {ligand_name} already extracted.")
-        return
-
-    # Check if the ligand file contains multiple models
-    with open(ligand_file) as f:
-        if "MODEL" in f.read():
-            # Use vina_split to split the ligand file into multiple PDBQT files
-            result = subprocess.run(
-                ["vina_split", "--input", ligand_file, "--ligand", str(output_dir / f"{ligand_name}_model")],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"Error: Failed to split ligand file {ligand_file}")
-                exit(1)
-
-            # Check if the output directory contains any split files
-            if not list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
-                print(f"Error: No models generated for ligand file {ligand_file}")
-                exit(1)
-
-            # Rename the split files to follow the expected naming convention
-            for model_file in output_dir.glob(f"{ligand_name}_model*.pdbqt"):
-                # Extract the model index (e.g., model03 -> 03)
-                stem_parts = model_file.stem.split("_model")
-                if len(stem_parts) == 2 and stem_parts[1].isdigit():
-                    model_index = stem_parts[1]
-                else:
-                    # fallback: last part after underscore
-                    model_index = model_file.stem.split("_")[-1]
-                new_name = f"{ligand_name}_model_{model_index}.pdbqt"
-                model_file.rename(output_dir / new_name)
-        else:
-            # Copy the single model file to the output directory
-            shutil.copy(ligand_file, output_dir / f"{ligand_name}_model_1.pdbqt")
-
-# Function to draw a progress bar
-def draw_progress_bar(row, col, length, current, total, waits=False):
-    """
-    Draw a progress bar in the terminal.
-    :param row: Cursor row position for the progress bar.
-    :param col: Cursor column position for the progress bar.
-    :param length: Length of the progress bar.
-    :param current: Current progress value.
-    :param total: Total progress value.
-    :param waits: Optional flag to wait after each character (default: False).
-    """
-    # Check if the current value exceeds the total value
-    if current > total:
-        current = total
-
-    # Check if the current value is negative
-    if current < 0:
-        current = 0
-
-    # Check if the progress bar length is valid
-    if length <= 0:
-        print("Error: Progress bar length must be greater than 0.")
-        return
-
-    # Check if the current and total values are valid
-    if current < 0 or total <= 0:
-        print("Error: Progress bar current and total values must be non-negative, and total must be greater than 0.")
-        return
-
-    # Calculate progress as a fraction (0 to 1)
-    progress = current / total
-
-    # Calculate the number of filled and empty segments
-    filled = int(progress * length)
-    empty = length - filled
-
-    # Draw the progress bar
-    bar = "[" + "\033[42m \033[0m" * filled + "\033[41m \033[0m" * empty + "]"
-    percent = f"{progress * 100:.2f}%"
-
-    # Move the cursor to the specified position and print the progress bar
-    print(f"\033[{row};{col}H{bar} {percent}", end="", flush=True)
-
-# Function to calculate RMS relative to ABA number
-def calculate_rms_relative_to_aba(aba_score, score):
-    """
-    Calculate the RMS relative to the ABA score.
-    :param aba_score: The ABA score (float).
-    :param score: The docking score (float).
-    :return: RMS relative to ABA (float).
-    """
-    rms_relative_to_aba = math.sqrt((score**2 - aba_score**2))
-    return rms_relative_to_aba
-
-# Calculate RMS relative to comparison ligands
-def calculate_rms_relative_to_comparison(score, comparison_scores):
-    """
-    Calculate the RMS relative to comparison ligands.
-    :param score: The docking score for the ligand.
-    :param comparison_scores: List of comparison ligand scores.
-    :return: RMS relative to comparison ligands.
-    """
-    if not comparison_scores:
-        return float("inf")  # Return infinity if no comparison scores are available
-    squared_differences = [(float(score) - float(c_score)) ** 2 for c_score in comparison_scores]
-    rms = math.sqrt(sum(squared_differences) / len(squared_differences))
-    return rms
-
-# Function to monitor the progress of the current docking process with a text-based progress bar
-def monitor_docking_progress(log_file):
-    """
-    Monitor the docking progress by reading the log file and updating a text-based progress bar.
-    :param log_file: Path to the log file being monitored.
-    """
-    console_width = shutil.get_terminal_size((80, 20)).columns  # Get terminal width
-    progress_bar_length = console_width - 30  # Adjust progress bar length
-    progress = 0
-
-    # Wait for the log file to be created
-    while not Path(log_file).exists():
-        time.sleep(0.2)  # Check every 0.2 seconds
-
-    dock_progress_row=15 # Row for the progress bar
-    
-    # Monitor the log file for progress updates
-    while progress < 100:
-        if Path(log_file).exists():
-            # Count the number of '*' characters in the log file to determine progress
-            with open(log_file, "r") as f:
-                progress = f.read().count("*") * 2  # Each '*' represents 2% progress
-
-            # Ensure progress does not exceed 100%
-            progress = min(progress, 100)
-
-            # Update the progress bar
-            move_cursor(dock_progress_row, 0)  # Move cursor to the progress bar row
-            print(f"\rCurrent docking progress: {progress}%   ", end="")
-            draw_progress_bar(dock_progress_row+1, 0, progress_bar_length, progress, 100)  # Fixed call
-
-        time.sleep(0.2)  # Update display every 0.2 seconds
-
-    # Ensure the progress bar is fully green at the end
-    move_cursor(dock_progress_row, 0)  # Move cursor to the progress bar row
-    print("\nCurrent docking progress: 100%")
-    draw_progress_bar(dock_progress_row+1, 0, progress_bar_length, 100, 100)  # Fixed call
-
-# Function to perform docking asynchronously
-CONFIG = read_config()
-validate_and_report_config(CONFIG)
-
-def perform_docking(ligand_file, protein_file, model_index):
-    """
-    Perform docking asynchronously using AutoDock Vina.
-    :param ligand_file: Path to the ligand file.
-    :param protein_file: Path to the protein file.
-    :param model_index: Index of the ligand model.
-    """
-    ligand_name = Path(ligand_file).stem  # Extract the base name without extension
-    protein_name = Path(protein_file).stem  # Extract the base name without extension
-    output_file = RESULTS_DIR / f"temp/{ligand_name}_model{model_index}_vs_{protein_name}.pdbqt"
-    log_file = RESULTS_DIR / f"temp/{ligand_name}_model{model_index}_vs_{protein_name}.log"
-
-    # Ensure the temp directory exists
-    (RESULTS_DIR / "temp").mkdir(parents=True, exist_ok=True)
-
-    # Calculate docking box parameters
-    center_x, center_y, center_z, size_x, size_y, size_z = calculate_docking_box(protein_file)
-
-    # Debugging information
-    if DEBUG:
-        print("Running AutoDock Vina with the following parameters:")
-        print(f"Receptor: {protein_file}")
-        print(f"Ligand: {ligand_file}")
-        print(f"Center: {center_x}, {center_y}, {center_z}")
-        print(f"Size: {size_x}, {size_y}, {size_z}")
-        print(f"Output: {output_file}")
-        print(f"Log: {log_file}")
-
-    # Run AutoDock Vina asynchronously
-    vina_command = [
-        "vina",
-        "--receptor", str(protein_file),
-        "--ligand", str(ligand_file),
-        "--center_x", str(center_x),
-        "--center_y", str(center_y),
-        "--center_z", str(center_z),
-        "--size_x", str(size_x),
-        "--size_y", str(size_y),
-        "--size_z", str(size_z),
-        "--out", str(output_file)
-    ]
-    # Add config options if present
-    if "cpu" in CONFIG:
-        vina_command += ["--cpu", CONFIG["cpu"]]
-    if "exhaustiveness" in CONFIG:
-        vina_command += ["--exhaustiveness", CONFIG["exhaustiveness"]]
-    if "energy_range" in CONFIG:
-        vina_command += ["--energy_range", CONFIG["energy_range"]]
-    if "num_modes" in CONFIG:
-        vina_command += ["--num_modes", CONFIG["num_modes"]]
-
-    with open(log_file, "w") as log:
-        vina_process = subprocess.Popen(vina_command, stdout=log, stderr=log)
-
-    # Monitor the docking progress
-    monitor_docking_progress(log_file)
-
-    # Wait for the docking process to complete
-    vina_process.wait()
-
-    # Check if the log file was created
-    if not log_file.exists():
-        print(f"Error: Log file not found: {log_file}")
-        FAILED_DOCKINGS.append((ligand_name, protein_name))
-        return
-
-    # Display the contents of the log file for debugging
-    if DEBUG:
-        # move the cursor to the bottom left
-        move_cursor(shutil.get_terminal_size((80, 20)).lines - 1, 0)
-        print(f"Contents of log file {log_file}:")
-        with open(log_file, "r") as log:
-            print(log.read())
-
-    # Extract score from log file and store it
-    score = None
-    with open(log_file, "r") as log:
-        for line in log:
-            if line.startswith("   1"):  # Look for the first result line
-                score = line.split()[1]  # Extract the score
-                break
-
-    log_message(f"Docking completed for {ligand_name} with {protein_name}. Score: {score}")
-
-    if score and (score.replace(".", "", 1).replace("-", "", 1).isdigit() or score == "-"):
-        log_message(f"   Valid score extracted: {score} for ligand: {ligand_name} with protein: {protein_name}")
-        if DEBUG:
-            print(f"Extracted score: {score} for ligand: {ligand_name} with protein: {protein_name}")
-        SCORES_DIR = RESULTS_DIR / "scores"
-        if not SCORES_DIR.exists():
-            SCORES_DIR.mkdir(parents=True, exist_ok=True)
-        # Write score to scores_<protein_name>.txt with header if new
-        scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+    def write_score(self, protein_name, ligand_name, score):
+        # Write or append to scores_<protein_name>.txt
+        scores_file = self.scores_dir / f"scores_{protein_name}.txt"
         header = "# Score  Ligand\n"
         if not scores_file.exists() or os.path.getsize(scores_file) == 0:
             with open(scores_file, "w") as f:
                 f.write(header)
         with open(scores_file, "a") as f:
             f.write(f"{score} {ligand_name}\n")
-        update_sorted_scores(scores_file)
-        write_stats(scores_file)
-        write_scores_csv(scores_file)
-        if DEBUG:
-            print(f"Score stored in {scores_file}")
-    else:
-        # log failure to extract a valid score
-        log_message(f"Failed to extract a valid score from log file: {log_file}")
-        print(f"Failed to extract a valid score from log file: {log_file}")
-        FAILED_DOCKINGS.append((ligand_name, protein_name))
+        self.update_sorted_scores(scores_file)
+        self.write_stats(scores_file)
+        self.write_scores_csv(scores_file)
 
-    ligand_name = Path(ligand_file).stem.split(".")[0]
-    model_part = ""
-    if "_model_" in Path(ligand_file).stem:
-        model_part = Path(ligand_file).stem.split("_model_")[-1]
-        dest_dir = RESULTS_DIR / "docked_ligands" / f"docked_{ligand_name}" / f"docked_{ligand_name}_model{model_part}"
-    else:
-        dest_dir = RESULTS_DIR / "docked_ligands" / f"docked_{ligand_name}"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(output_file), dest_dir / output_file.name)
-    shutil.move(str(log_file), dest_dir / log_file.name)
+    def update_sorted_scores(self, scores_file):
+        # Sort and rewrite scores file
+        with open(scores_file, "r") as f:
+            lines = [line for line in f if not line.startswith("#")]
+        sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]))
+        with open(scores_file, "w") as f:
+            f.write("# Score  Ligand\n")
+            f.writelines(sorted_lines)
 
-    # Write metadata
-    env_info = f"Python version: {sys.version}"
-    write_metadata(dest_dir, vina_command, env_info)
+    def write_stats(self, scores_file):
+        # Write statistics file
+        with open(scores_file) as f:
+            scores = [float(line.split()[0]) for line in f if not line.startswith("#")]
+        if scores:
+            mean = statistics.mean(scores)
+            median = statistics.median(scores)
+            stdev = statistics.stdev(scores) if len(scores) > 1 else 0
+            stats_file = scores_file.parent / (scores_file.stem + "_stats.txt")
+            with open(stats_file, "w") as f:
+                f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
 
-# Function to display progress
-def display_progress(current_task, total_tasks, ligand_index, total_ligands, model_index, total_models, protein_index, total_proteins, ligand_name, protein_name):
-    """
-    Display the progress of the docking process with an estimated time to completion (ETC).
-:param current_task: Current task number.
-    :param total_tasks: Total number of tasks.
-    :param ligand_index: Current ligand index.
-    :param total_ligands: Total number of ligands.
-    :param model_index: Current model index.
-    :param total_models: Total number of models.
-    :param protein_index: Current protein index.
-    :param total_proteins: Total number of proteins.
-    :param ligand_name: Name of the current ligand.
-    :param protein_name: Name of the current protein.
-    """
-    console_width = shutil.get_terminal_size((80, 20)).columns
-    progress_bar_length = console_width - 30
+    def write_scores_csv(self, scores_file):
+        # Write CSV version
+        csv_file = scores_file.with_suffix('.csv')
+        with open(scores_file) as fin, open(csv_file, "w") as fout:
+            fout.write("Score,Ligand\n")
+            for line in fin:
+                if line.startswith("#"): continue
+                fout.write(",".join(line.strip().split()) + "\n")
 
-    # Calculate elapsed time for the last 10 tasks
-    if TASK_DURATIONS:
-        avg_task_time = sum(TASK_DURATIONS) / len(TASK_DURATIONS)
-    else:
-        avg_task_time = 0
+    def write_ligand_stats(self, ligand_file, proteins):
+        # Write per-ligand stats
+        ligand_name = Path(ligand_file).stem
+        scores = []
+        for protein_file in proteins:
+            protein_name = Path(protein_file).stem
+            scores_file = self.scores_dir / f"scores_{protein_name}.txt"
+            if scores_file.exists():
+                with open(scores_file) as f:
+                    for line in f:
+                        if line.startswith("#"): continue
+                        if ligand_name in line:
+                            scores.append(float(line.split()[0]))
+                            break
+        if scores:
+            mean = statistics.mean(scores)
+            median = statistics.median(scores)
+            stdev = statistics.stdev(scores) if len(scores) > 1 else 0
+            stats_file = self.scores_dir / "ligands" / f"{ligand_name}_stats.txt"
+            stats_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(stats_file, "w") as f:
+                f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
 
-    # Calculate remaining tasks and ETC
-    remaining_tasks = total_tasks - current_task
-    remaining_time = avg_task_time * remaining_tasks if avg_task_time > 0 else 0
+    def write_ligand_protein_scores(self, ligands, proteins):
+        # Write per-ligand/protein scores
+        SCORES_DIR = self.scores_dir / "ligands"
+        SCORES_DIR.mkdir(parents=True, exist_ok=True)
+        for ligand_file in ligands:
+            ligand_name = Path(ligand_file).stem
+            out_file = SCORES_DIR / f"scores_{ligand_name}.txt"
+            with open(out_file, "w") as f:
+                f.write("# Score  Protein\n")
+                for protein_file in proteins:
+                    protein_name = Path(protein_file).stem
+                    scores_file = self.scores_dir / f"scores_{protein_name}.txt"
+                    score = None
+                    if scores_file.exists():
+                        with open(scores_file) as sf:
+                            for line in sf:
+                                if line.startswith("#"): continue
+                                if ligand_name in line:
+                                    score = line.split()[0]
+                                    break
+                    if score is not None:
+                        f.write(f"{score} {protein_name}\n")
 
-    # Format remaining time as HH:MM:SS
-    hours, rem = divmod(int(remaining_time), 3600)
-    minutes, seconds = divmod(rem, 60)
-    etc = f"{hours:02}:{minutes:02}:{seconds:02}"
+    def write_comparison_ligand_protein_scores(self, comparison_ligands, proteins):
+        # Write per-comparison-ligand/protein scores
+        SCORES_DIR = self.scores_dir / "comparison_ligands"
+        SCORES_DIR.mkdir(parents=True, exist_ok=True)
+        for comp_lig_file in comparison_ligands:
+            comp_lig_name = Path(comp_lig_file).stem
+            out_file = SCORES_DIR / f"scores_{comp_lig_name}.txt"
+            with open(out_file, "w") as f:
+                f.write("# Score  Protein\n")
+                for protein_file in proteins:
+                    protein_name = Path(protein_file).stem
+                    scores_file = self.scores_dir / f"scores_{protein_name}.txt"
+                    score = None
+                    if scores_file.exists():
+                        with open(scores_file) as sf:
+                            for line in sf:
+                                if line.startswith("#"): continue
+                                if comp_lig_name in line:
+                                    score = line.split()[0]
+                                    break
+                    if score is not None:
+                        f.write(f"{score} {protein_name}\n")
 
-    print("\033[H\033[J", end="")  # Clear the terminal
-    print("========================================")
-    print("         Protein-Ligand Docking         ")
-    print("========================================")
-    print()
-    print(f"Docking:")
-    print(f"Ligand file {ligand_index + 1}/{total_ligands}")
-    draw_progress_bar(7, 0, progress_bar_length, ligand_index + 1, total_ligands, False)
+    def write_summary_file(self, ligands, proteins, comparison_ligands):
+        # Write summary file
+        summary_file = self.results_dir / "summary.txt"
+        with open(summary_file, "w") as f:
+            f.write("Ligands:\n")
+            for ligand in ligands:
+                f.write(f"  {Path(ligand).stem}\n")
+            f.write("\nProteins:\n")
+            for protein in proteins:
+                f.write(f"  {Path(protein).stem}\n")
+            f.write("\nComparison Ligands:\n")
+            for comp in comparison_ligands:
+                f.write(f"  {Path(comp).stem}\n")
 
-    move_cursor(9, 0)
-    print(f"Ligand model: model {model_index + 1}/{total_models}")
-    draw_progress_bar(10, 0, progress_bar_length, model_index + 1, total_models, False)
+    def write_per_protein_comparison_ligand_rankings(self, ligands, proteins, comparison_ligands):
+        # Write per-protein, per-comparison-ligand rankings
+        SCORES_DIR = self.scores_dir
+        for comp_lig_file in comparison_ligands:
+            comp_lig_name = Path(comp_lig_file).stem
+            for protein_file in proteins:
+                protein_name = Path(protein_file).stem
+                scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+                comp_score = None
+                if not scores_file.exists():
+                    continue
+                with open(scores_file) as f:
+                    for line in f:
+                        if line.startswith("#"): continue
+                        if comp_lig_name in line:
+                            comp_score = float(line.split()[0])
+                            break
+                if comp_score is None:
+                    continue
+                diffs = []
+                with open(scores_file) as f:
+                    for line in f:
+                        if line.startswith("#"): continue
+                        score, lig_name = line.split()
+                        diff = float(score) - comp_score
+                        diffs.append((abs(diff), diff, lig_name))
+                diffs.sort()
+                ranked_file = SCORES_DIR / f"scores_{comp_lig_name}_in_{protein_name}_ranked.txt"
+                with open(ranked_file, "w") as f:
+                    f.write(f"# Generated: {time.ctime()}\n")
+                    f.write("# ScoreDiff  Ligand\n")
+                    for _, diff, lig_name in diffs:
+                        f.write(f"{diff:.4f} {lig_name}\n")
 
-    move_cursor(12, 0)
-    print(f"Ligand progress: protein {protein_index + 1}/{total_proteins}")
-    draw_progress_bar(13, 0, progress_bar_length, protein_index + 1, total_proteins, False)
+    def write_ligand_rms_to_comparison(self, ligands, proteins, comparison_ligands):
+        # Write per-ligand RMS to comparison ligands
+        SCORES_DIR = self.scores_dir
+        OUT_DIR = SCORES_DIR / "ligands"
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        for ligand_file in ligands:
+            ligand_name = Path(ligand_file).stem
+            out_file = OUT_DIR / f"{ligand_name}_RMS_to_comparison_ligands.txt"
+            with open(out_file, "w") as f:
+                f.write(f"# Generated: {time.ctime()}\n")
+                f.write("# ComparisonLigand  RMS\n")
+                for comp_lig_file in comparison_ligands:
+                    comp_lig_name = Path(comp_lig_file).stem
+                    rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
+                    rms_value = None
+                    if rms_file.exists():
+                        with open(rms_file) as rf:
+                            for line in rf:
+                                if line.startswith("#"): continue
+                                if ligand_name in line:
+                                    rms_value = float(line.split()[0])
+                                    break
+                    if rms_value is not None:
+                        f.write(f"{comp_lig_name} {rms_value:.4f}\n")
 
-    # Current docking progress bar
-    move_cursor(15, 0)
-    print("Current docking progress:")
-    draw_progress_bar(16, 0, progress_bar_length, 0, 100, False)
+    def write_failed_docking_summary(self, failed_dockings):
+        # Write failed docking summary
+        out_file = self.results_dir / "failed_docking_attempts.txt"
+        with open(out_file, "w") as f:
+            f.write(f"# Generated: {time.ctime()}\n")
+            f.write("# Ligand  Protein\n")
+            for ligand, protein in failed_dockings:
+                f.write(f"{ligand} {protein}\n")
 
-    move_cursor(19, 0)
-    print(f"Ligand name: {ligand_name}")
-    print(f"Protein name: {protein_name}")
+    @staticmethod
+    def write_metadata(dest_dir, vina_command, env_info):
+        with open(dest_dir / "metadata.txt", "w") as f:
+            f.write("Vina command:\n")
+            f.write(" ".join(vina_command) + "\n")
+            f.write("Environment:\n")
+            f.write(env_info + "\n")
 
-    percent_through_dock = (current_task * 100) / total_tasks
-    move_cursor(21, 0)
-    print(f"Total progress: {current_task}/{total_tasks}")
-    draw_progress_bar(22, 0, progress_bar_length, current_task, total_tasks, False)
+    def calculate_best_ligands(self, ligands, proteins, comparison_ligands):
+        best_ligands_file = self.results_dir / "best_ligands.txt"
+        with open(best_ligands_file, "w") as best_ligands:
+            for ligand_file in ligands:
+                models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
+                for model_file in models:
+                    model_name = Path(model_file).stem
+                    diffs = []
+                    for protein_file in proteins:
+                        protein_name = Path(protein_file).stem
+                        scores_file = self.scores_dir / f"scores_{protein_name}.txt"
+                        model_score = self.get_score(scores_file, model_name)
+                        if model_score is None:
+                            continue
+                        comp_scores = []
+                        for comp_lig_file in comparison_ligands:
+                            comp_lig_name = Path(comp_lig_file).stem
+                            comp_score = self.get_score(scores_file, comp_lig_name)
+                            if comp_score is not None:
+                                comp_scores.append(comp_score)
+                        for comp_score in comp_scores:
+                            diffs.append(model_score - comp_score)
+                    if diffs:
+                        rms = math.sqrt(sum(d**2 for d in diffs) / len(diffs))
+                        best_ligands.write(f"{rms:.8f} {model_name}\n")
 
-    # Display estimated time to completion
-    move_cursor(24, 0)
-    print(f"Estimated time to completion: {etc}")
+    def rank_and_display_best_ligands(self):
+        """
+        Rank the best ligands and display the top 5.
+        """
+        best_ligands_file = self.results_dir / "best_ligands.txt"
+        ranked_best_ligands_file = self.results_dir / "ranked_best_ligands.txt"
 
-    move_cursor(26, 0)
-    print("Do CTRL+C to exit")
+        if best_ligands_file.exists():
+            with open(best_ligands_file, "r") as f:
+                sorted_ligands = sorted(f.readlines(), key=lambda x: float(x.split()[0]))
+            with open(ranked_best_ligands_file, "w") as f:
+                f.writelines(sorted_ligands)
+            print(f"Best ligands ranked and saved to {ranked_best_ligands_file}.")
 
-# Function to display comparison progress
-def display_comparison_progress(current_task, total_tasks, comparison_ligand_index, total_comparison_ligands, protein_index, total_proteins, comparison_ligand_name, protein_name):
-    """
-    Display the progress of docking for comparison ligands.
-    :param current_task: Current task number.
-    :param total_tasks: Total number of tasks.
-    :param comparison_ligand_index: Current comparison ligand index.
-    :param total_comparison_ligands: Total number of comparison ligands.
-    :param protein_index: Current protein index.
-    :param total_proteins: Total number of proteins.
-    :param comparison_ligand_name: Name of the current comparison ligand.
-    :param protein_name: Name of the current protein.
-    """
-    console_width = shutil.get_terminal_size((80, 20)).columns
-    progress_bar_length = console_width - 30
-
-    print("\033[H\033[J", end="")  # Clear the terminal
-    print("========================================")
-    print("   Initial Calculation of Comparison    ")
-    print("========================================")
-    print()
-    print(f"Docking comparisons:")
-    print(f"Total progress: comparison ligand {comparison_ligand_index + 1}/{total_comparison_ligands}")
-    draw_progress_bar(7, 0, progress_bar_length, comparison_ligand_index + 1, total_comparison_ligands, False)
-    move_cursor(9, 0)
-    print(f"Comparison ligand progress: protein {protein_index + 1}/{total_proteins}")
-    draw_progress_bar(10, 0, progress_bar_length, protein_index + 1, total_proteins, False)
-    move_cursor(19, 0)
-    print(f"Comparison ligand name: {comparison_ligand_name}")
-    print(f"Protein name: {protein_name}")
-
-    percent_through_dock = (current_task * 100) / total_tasks
-    move_cursor(21, 0)
-    print(f"% through dock: {percent_through_dock:.2f}%")
-    draw_progress_bar(22, 0, progress_bar_length, current_task, total_tasks, False)
-
-    move_cursor(24, 0)
-    print("Do CTRL+C to exit")
-    print()
-
-# Function to add empty lines
-def add_empty_lines():
-    """
-    Add empty lines to create space for display updates.
-    """
-    console_height = shutil.get_terminal_size((80, 20)).lines
-    for _ in range(console_height):
-        print()
-
-# Function to clear the display area
-def clear_display_area():
-    """
-    Clear the display area in the terminal.
-    """
-    console_height = shutil.get_terminal_size((80, 20)).lines
-    console_width = shutil.get_terminal_size((80, 20)).columns
-    print("\033[H", end="")  # Move cursor to the top left corner
-    for _ in range(console_height):
-        print(" " * console_width)
-    print("\033[H", end="")  # Move cursor back to the top left corner
-
-# Function to move the cursor to a specific position
-def move_cursor(row, col):
-    """
-    Move the cursor to a specific row and column in the terminal.
-    :param row: The row number (1-based).
-    :param col: The column number (1-based).
-    """
-    print(f"\033[{row};{col}H", end="", flush=True)
-
-# Function to handle termination signals
-def terminate_script(signal_received, frame):
-    """
-    Handle termination signals and save progress before exiting.
-    """
-    print("\nTermination signal received. Saving progress...")
-    progress = {
-        "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-        "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-        "LIGAND_INDEX": LIGAND_INDEX,
-        "MODEL_INDEX": MODEL_INDEX,
-        "PROTEIN_INDEX": PROTEIN_INDEX
-    }
-    update_progress(progress)
-    write_failed_docking_summary()
-    exit(0)
-
-# Move all .log and .pdbqt files to the dedicated subfolder
-def move_temp_files():
-    """
-    Move all .log and .pdbqt files from the temp directory to the results directory.
-    If a file with the same name already exists in the destination, rename the file being moved.
-    """
-    temp_dir = RESULTS_DIR / "temp"
-    DOCKED_LIGANDS_DIR = RESULTS_DIR / "docked_ligands"
-    DOCKED_LIGANDS_DIR.mkdir(parents=True, exist_ok=True)
-    for file in temp_dir.glob("*"):
-        # Extract ligand/model name from file name
-        parts = file.stem.split("_vs_")[0].split("_model")
-        ligand_base = parts[0]
-        model_part = f"model{parts[1]}" if len(parts) > 1 else None
-        # Clean up ligand name (remove extra extensions)
-        ligand_base_clean = ligand_base.split(".")[0]
-        if model_part:
-            dest_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_base_clean}" / f"docked_{ligand_base_clean}_{model_part}"
+            # Display the top 5 ligands
+            print("Top 5 ligands:")
+            for line in sorted_ligands[:5]:
+                print(line.strip())  # This will now show model names, e.g., "0.27196004 AAEAMN_model01"
         else:
-            dest_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_base_clean}"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(file), dest_dir / file.name)
+            print("No best ligands file found. Skipping ranking.")
 
-# Calculate and display top dockers for each protein
-def calculate_top_dockers(proteins):
-    """
-    Sort and save the top dockers for each protein.
-    :param proteins: List of protein file paths.
-    """
-    SCORES_DIR = RESULTS_DIR / "scores"
-    SCORES_PROTEINS_DIR = SCORES_DIR / "scores_proteins"
-    SCORES_PROTEINS_DIR.mkdir(parents=True, exist_ok=True)
-    for protein_file in proteins:
-        protein_name = Path(protein_file).stem
-        scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
-        top_dockers_file = SCORES_DIR / f"top_dockers_{protein_name}.txt"
-        protein_dir = SCORES_PROTEINS_DIR / f"scores_{protein_name}"
-        protein_dir.mkdir(parents=True, exist_ok=True)
-        unsorted_file = protein_dir / f"scores_{protein_name}_unsorted.txt"
-        sorted_file = protein_dir / f"scores_{protein_name}_sorted.txt"
+    def generate_comparison_scores(self, ligands, proteins, comparison_ligands):
+        SCORES_DIR = self.scores_dir
+        for comp_lig_file in comparison_ligands:
+            comp_lig_name = Path(comp_lig_file).stem
+            rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
+            rms_scores = []
+            for protein_file in proteins:
+                protein_name = Path(protein_file).stem
+                comp_scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+                comp_score = None
+                with open(comp_scores_file) as f:
+                    for line in f:
+                        if line.startswith("#"): continue
+                        if comp_lig_name in line:
+                            comp_score = float(line.split()[0])
+                            break
+                if comp_score is None:
+                    continue
+                diffs = []
+                with open(comp_scores_file) as f:
+                    for line in f:
+                        if line.startswith("#"): continue
+                        score, lig_name = line.split()
+                        diff = float(score) - comp_score
+                        diffs.append((abs(diff), diff, lig_name))
+                diffs.sort()
+                per_protein_file = SCORES_DIR / f"scores_{comp_lig_name}" / f"scores_{comp_lig_name}_in_{protein_name}.txt"
+                per_protein_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(per_protein_file, "w") as f:
+                    f.write("# ScoreDiff  Ligand\n")
+                    for _, diff, lig_name in diffs:
+                        f.write(f"{diff:.4f} {lig_name}\n")
+                for _, diff, lig_name in diffs:
+                    rms_scores.append((lig_name, diff))
+            ligand_rms = {}
+            for lig_name, diff in rms_scores:
+                ligand_rms.setdefault(lig_name, []).append(diff)
+            rms_list = []
+            for lig_name, diffs in ligand_rms.items():
+                rms = math.sqrt(sum(d**2 for d in diffs) / len(diffs))
+                rms_list.append((rms, lig_name))
+            rms_list.sort()
+            with open(rms_file, "w") as f:
+                f.write("# RMS  Ligand\n")
+                for rms, lig_name in rms_list:
+                    f.write(f"{rms:.4f} {lig_name}\n")
 
+    def generate_ligand_score_summaries(self, ligands, proteins, comparison_ligands):
+        SCORES_DIR = self.scores_dir
+        DOCKED_LIGANDS_DIR = self.results_dir / "docked_ligands"
+        for ligand_file in ligands:
+            ligand_name = Path(ligand_file).stem
+            # Handle models
+            model_dirs = list((DOCKED_LIGANDS_DIR / f"docked_{ligand_name}").glob("docked_*"))
+            if model_dirs:
+                for model_dir in model_dirs:
+                    model_name = model_dir.name.replace("docked_", "")
+                    summary_file = model_dir / f"{model_name}_scores.txt"
+                    self.write_ligand_summary(summary_file, model_name, proteins, comparison_ligands, SCORES_DIR)
+            else:
+                ligand_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_name}"
+                summary_file = ligand_dir / f"{ligand_name}_scores.txt"
+                self.write_ligand_summary(summary_file, ligand_name, proteins, comparison_ligands, SCORES_DIR)
+
+    def write_ligand_summary(self, summary_file, ligand_name, proteins, comparison_ligands, SCORES_DIR):
+        summary_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+        with open(summary_file, "w") as f:
+            for comp_lig_file in comparison_ligands:
+                comp_lig_name = Path(comp_lig_file).stem
+                # RMS and rank
+                rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
+                rms_rank = None
+                rms_value = None
+                if rms_file.exists():
+                    with open(rms_file) as rf:
+                        rms_lines = [line.strip() for line in rf if line.strip()]
+                        for idx, line in enumerate(rms_lines):
+                            if ligand_name in line:
+                                rms_value = float(line.split()[0])
+                                rms_rank = idx + 1
+                                break
+                f.write(f"{comp_lig_name}:\n")
+                if rms_value is not None:
+                    f.write(f"  RMS: {rms_value:.4f} - #{rms_rank}/{len(rms_lines)}\n")
+                else:
+                    f.write("  RMS: N/A\n")
+                # Per-protein scores and ranks
+                for protein_file in proteins:
+                    protein_name = Path(protein_file).stem
+                    per_protein_file = SCORES_DIR / f"scores_{comp_lig_name}" / f"scores_{comp_lig_name}_in_{protein_name}.txt"
+                    if per_protein_file.exists():
+                        with open(per_protein_file) as pf:
+                            lines = [line.strip() for line in pf if line.strip()]
+                            for idx, line in enumerate(lines):
+                                if ligand_name in line:
+                                    diff = line.split()[0]
+                                    rank = idx + 1
+                                    f.write(f"  {protein_name}: {diff} - #{rank}/{len(lines)}\n")
+                                    break
+
+    def calculate_top_dockers(self, proteins):
+        SCORES_DIR = self.scores_dir / "scores_proteins"
+        SCORES_DIR.mkdir(parents=True, exist_ok=True)
+        for protein_file in proteins:
+            protein_name = Path(protein_file).stem
+            scores_file = self.scores_dir / f"scores_{protein_name}.txt"
+            top_dockers_file = self.scores_dir / f"top_dockers_{protein_name}.txt"
+            protein_dir = SCORES_DIR / f"scores_{protein_name}"
+            protein_dir.mkdir(parents=True, exist_ok=True)
+            unsorted_file = protein_dir / f"scores_{protein_name}_unsorted.txt"
+            sorted_file = protein_dir / f"scores_{protein_name}_sorted.txt"
+
+            if scores_file.exists():
+                with open(scores_file, "r") as f:
+                    lines = [line for line in f if not line.startswith("#")]
+                    sorted_scores = sorted(lines, key=lambda x: float(x.split()[0]))
+                # Write unsorted with header
+                with open(unsorted_file, "w") as f:
+                    f.write("# Score  Ligand\n")
+                    f.writelines(lines)
+                # Write sorted with header
+                with open(sorted_file, "w") as f:
+                    f.write("# Score  Ligand\n")
+                    f.writelines(sorted_scores)
+                # Also update top_dockers_file with header
+                with open(top_dockers_file, "w") as f:
+                    f.write("# Score  Ligand\n")
+                    f.writelines(sorted_scores)
+                self.write_stats(scores_file)
+                self.write_scores_csv(scores_file)
+                print(f"Top dockers for {protein_name} saved to {top_dockers_file}.")
+            else:
+                print(f"No scores file found for protein: {protein_name}. Skipping sorting.")
+
+    def get_score(self, scores_file, ligand_name):
         if scores_file.exists():
             with open(scores_file, "r") as f:
-                lines = [line for line in f if not line.startswith("#")]
-                sorted_scores = sorted(lines, key=lambda x: float(x.split()[0]))
-            # Write unsorted with header
-            with open(unsorted_file, "w") as f:
-                f.write("# Score  Ligand\n")
-                f.writelines(lines)
-            # Write sorted with header
-            with open(sorted_file, "w") as f:
-                f.write("# Score  Ligand\n")
-                f.writelines(sorted_scores)
-            # Also update top_dockers_file with header
-            with open(top_dockers_file, "w") as f:
-                f.write("# Score  Ligand\n")
-                f.writelines(sorted_scores)
-            write_stats(scores_file)
-            write_scores_csv(scores_file)
-            print(f"Top dockers for {protein_name} saved to {top_dockers_file}.")
-        else:
-            print(f"No scores file found for protein: {protein_name}. Skipping sorting.")
+                for line in f:
+                    if line.startswith("#"):
+                        continue
+                    score, name = line.split()
+                    if name == ligand_name:
+                        return float(score)
+        return None
 
 # create a log folder in the dock folder
 if not (BASE_DIR / "log").exists():
@@ -666,421 +604,473 @@ with open(LOG_FILE, "a") as log:
     log.write(f"Docking log - Start time: {time.ctime(START_TIME)}\n")
     log.write("========================================\n")
 
-# create a log function to log messages to the log file
-def log_message(message):
-    """
-    Log a message to the log file.
-    :param message: The message to log.
-    """
-    with open(LOG_FILE, "a") as log:
-        log.write(f"{time.ctime(time.time())}: {message}\n")
-        log.flush()  # Ensure the log is written immediately
+class LogManager:
+    def __init__(self, log_file):
+        self.log_file = log_file
 
-# Calculate the best ligands using RMS relative to comparison ligands
-def calculate_best_ligands(ligands, proteins, comparison_ligands):
-    """
-    Calculate the best ligands using RMS relative to comparison ligands.
-    :param ligands: List of ligand file paths.
-    :param proteins: List of protein file paths.
-    :param comparison_ligands: List of comparison ligand file paths.
-    """
-    best_ligands_file = RESULTS_DIR / "best_ligands.txt"
-    with open(best_ligands_file, "w") as best_ligands:
-        for ligand_file in ligands:
-            ligand_name = Path(ligand_file).stem
-            total_score = 0
-            count = 0
+    def log(self, message):
+        with open(self.log_file, "a") as log:
+            log.write(f"{time.ctime(time.time())}: {message}\n")
+            log.flush()
 
-            for protein_file in proteins:
-                protein_name = Path(protein_file).stem
-                scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
+class LigandManager:
+    def __init__(self, ligand_dir, cache_dir):
+        self.ligand_dir = ligand_dir
+        self.cache_dir = cache_dir
 
-                if not scores_file.exists():
-                    continue
-
-                # Get the score for the ligand
-                score = None
-                with open(scores_file, "r") as f:
-                    for line in f:
-                        if ligand_name in line:
-                            score = float(line.split()[0])
-                            break
-
-                if score is not None:
-                    # Get comparison scores
-                    comparison_scores = []
-                    for comparison_ligand_file in comparison_ligands:
-                        comparison_ligand_name = Path(comparison_ligand_file).stem
-                        with open(scores_file, "r") as f:
-                            for line in f:
-                                if comparison_ligand_name in line:
-                                    comparison_scores.append(float(line.split()[0]))
-                                    break
-
-                    # Calculate RMS relative to comparison ligands
-                    rms_relative_to_comparison = calculate_rms_relative_to_comparison(score, comparison_scores)
-                    if rms_relative_to_comparison > 0:
-                        total_score += 1 / (rms_relative_to_comparison ** 2)
-                        count += 1
-                    else:
-                        # log error
-                        log_message(
-                            f"Error: RMS relative to comparison ligands is zero or negative for {ligand_name} with {protein_name}.")
-                        print(f"Error: RMS relative to comparison ligands is zero or negative for {ligand_name} with {protein_name}.")
-
-
-            if count > 0:
-                final_score = math.sqrt(count / total_score)
-                best_ligands.write(f"{final_score:.8f} {ligand_name}\n")
-                print(f"Final score for {ligand_name}: {final_score:.8f}")
-
-# Rank and display the best ligands
-def rank_and_display_best_ligands():
-    """
-    Rank the best ligands and display the top 5.
-    """
-    best_ligands_file = RESULTS_DIR / "best_ligands.txt"
-    ranked_best_ligands_file = RESULTS_DIR / "ranked_best_ligands.txt"
-
-    if best_ligands_file.exists():
-        with open(best_ligands_file, "r") as f:
-            sorted_ligands = sorted(f.readlines(), key=lambda x: float(x.split()[0]))
-        with open(ranked_best_ligands_file, "w") as f:
-            f.writelines(sorted_ligands)
-        print(f"Best ligands ranked and saved to {ranked_best_ligands_file}.")
-
-        # Display the top 5 ligands
-        print("Top 5 ligands:")
-        for line in sorted_ligands[:5]:
-            print(line.strip())
-    else:
-        print("No best ligands file found. Skipping ranking.")
-
-def generate_comparison_scores(ligands, proteins, comparison_ligands):
-    SCORES_DIR = RESULTS_DIR / "scores"
-    for comp_lig_file in comparison_ligands:
-        comp_lig_name = Path(comp_lig_file).stem
-        rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
-        rms_scores = []
-        for protein_file in proteins:
-            protein_name = Path(protein_file).stem
-            comp_scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
-            comp_score = None
-            with open(comp_scores_file) as f:
-                for line in f:
-                    if line.startswith("#"): continue
-                    if comp_lig_name in line:
-                        comp_score = float(line.split()[0])
-                        break
-            if comp_score is None:
-                continue
-            diffs = []
-            with open(comp_scores_file) as f:
-                for line in f:
-                    if line.startswith("#"): continue
-                    score, lig_name = line.split()
-                    diff = float(score) - comp_score
-                    diffs.append((abs(diff), diff, lig_name))
-            diffs.sort()
-            per_protein_file = SCORES_DIR / f"scores_{comp_lig_name}" / f"scores_{comp_lig_name}_in_{protein_name}.txt"
-            per_protein_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(per_protein_file, "w") as f:
-                f.write("# ScoreDiff  Ligand\n")
-                for _, diff, lig_name in diffs:
-                    f.write(f"{diff:.4f} {lig_name}\n")
-            for _, diff, lig_name in diffs:
-                rms_scores.append((lig_name, diff))
-        ligand_rms = {}
-        for lig_name, diff in rms_scores:
-            ligand_rms.setdefault(lig_name, []).append(diff)
-        rms_list = []
-        for lig_name, diffs in ligand_rms.items():
-            rms = math.sqrt(sum(d**2 for d in diffs) / len(diffs))
-            rms_list.append((rms, lig_name))
-        rms_list.sort()
-        with open(rms_file, "w") as f:
-            f.write("# RMS  Ligand\n")
-            for rms, lig_name in rms_list:
-                f.write(f"{rms:.4f} {lig_name}\n")
-
-def generate_ligand_score_summaries(ligands, proteins, comparison_ligands):
-    SCORES_DIR = RESULTS_DIR / "scores"
-    DOCKED_LIGANDS_DIR = RESULTS_DIR / "docked_ligands"
-    for ligand_file in ligands:
+    def extract_models(self, ligand_file):
         ligand_name = Path(ligand_file).stem
-        # Handle models
-        model_dirs = list((DOCKED_LIGANDS_DIR / f"docked_{ligand_name}").glob("docked_*"))
-        if model_dirs:
-            for model_dir in model_dirs:
-                model_name = model_dir.name.replace("docked_", "")
-                summary_file = model_dir / f"{model_name}_scores.txt"
-                write_ligand_summary(summary_file, model_name, proteins, comparison_ligands, SCORES_DIR)
-        else:
-            ligand_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_name}"
-            summary_file = ligand_dir / f"{ligand_name}_scores.txt"
-            write_ligand_summary(summary_file, ligand_name, proteins, comparison_ligands, SCORES_DIR)
-
-def write_ligand_summary(summary_file, ligand_name, proteins, comparison_ligands, SCORES_DIR):
-    summary_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-    with open(summary_file, "w") as f:
-        for comp_lig_file in comparison_ligands:
-            comp_lig_name = Path(comp_lig_file).stem
-            # RMS and rank
-            rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
-            rms_rank = None
-            rms_value = None
-            if rms_file.exists():
-                with open(rms_file) as rf:
-                    rms_lines = [line.strip() for line in rf if line.strip()]
-                    for idx, line in enumerate(rms_lines):
-                        if ligand_name in line:
-                            rms_value = float(line.split()[0])
-                            rms_rank = idx + 1
-                            break
-            f.write(f"{comp_lig_name}:\n")
-            if rms_value is not None:
-                f.write(f"  RMS: {rms_value:.4f} - #{rms_rank}/{len(rms_lines)}\n")
+        output_dir = self.cache_dir / f"models_{ligand_name}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
+            print(f"Models for {ligand_name} already extracted.")
+            return
+        with open(ligand_file) as f:
+            if "MODEL" in f.read():
+                result = subprocess.run(
+                    ["vina_split", "--input", ligand_file, "--ligand", str(output_dir / f"{ligand_name}_model")],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode != 0:
+                    print(f"Error: Failed to split ligand file {ligand_file}")
+                    exit(1)
+                if not list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
+                    print(f"Error: No models generated for ligand file {ligand_file}")
+                    exit(1)
+                for model_file in output_dir.glob(f"{ligand_name}_model*.pdbqt"):
+                    stem_parts = model_file.stem.split("_model")
+                    if len(stem_parts) == 2 and stem_parts[1].isdigit():
+                        model_index = stem_parts[1]
+                    else:
+                        model_index = model_file.stem.split("_")[-1]
+                    new_name = f"{ligand_name}_model_{model_index}.pdbqt"
+                    model_file.rename(output_dir / new_name)
             else:
-                f.write("  RMS: N/A\n")
-            # Per-protein scores and ranks
-            for protein_file in proteins:
-                protein_name = Path(protein_file).stem
-                per_protein_file = SCORES_DIR / f"scores_{comp_lig_name}" / f"scores_{comp_lig_name}_in_{protein_name}.txt"
-                if per_protein_file.exists():
-                    with open(per_protein_file) as pf:
-                        lines = [line.strip() for line in pf if line.strip()]
-                        for idx, line in enumerate(lines):
-                            if ligand_name in line:
-                                diff = line.split()[0]
-                                rank = idx + 1
-                                f.write(f"  {protein_name}: {diff} - #{rank}/{len(lines)}\n")
-                                break
+                shutil.copy(ligand_file, output_dir / f"{ligand_name}_model_1.pdbqt")
+
+    @staticmethod
+    def clean_ligand_name(name):
+        return name.split(".")[0].replace(" ", "_")
+
+class ProteinManager:
+    def __init__(self, protein_dir):
+        self.protein_dir = protein_dir
+
+    def calculate_docking_box(self, protein_file):
+        center_x, center_y, center_z = 0, 0, 0
+        count = 0
+        with open(protein_file) as f:
+            for line in f:
+                if line.startswith("ATOM"):
+                    parts = line.split()
+                    center_x += float(parts[6])
+                    center_y += float(parts[7])
+                    center_z += float(parts[8])
+                    count += 1
+        if count > 0:
+            center_x /= count
+            center_y /= count
+            center_z /= count
+        size_x, size_y, size_z = 20, 20, 20
+        return center_x, center_y, center_z, size_x, size_y, size_z
+
+class ProgressManager:
+    def __init__(self, cache_file, score_manager):
+        self.cache_file = cache_file
+        self.score_manager = score_manager
+
+    def read_progress(self):
+        if self.cache_file.exists():
+            progress = {}
+            with open(self.cache_file) as f:
+                for line in f:
+                    key, value = line.strip().split("=")
+                    progress[key] = int(value)
+            return progress
+        else:
+            print("Error: Progress cache file not found.")
+            exit(1)
+
+    def update_progress(self, progress):
+        with open(self.cache_file, "w") as f:
+            for key, value in progress.items():
+                f.write(f"{key}={value}\n")
+
+    def terminate_script(self, signal_received, frame):
+        print("\nTermination signal received. Saving progress...")
+        progress = {
+            "COMPARISON_LIGAND_INDEX": globals().get("COMPARISON_LIGAND_INDEX", 0),
+            "COMPARISON_PROTEIN_INDEX": globals().get("COMPARISON_PROTEIN_INDEX", 0),
+            "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
+            "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
+            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0)
+        }
+        self.update_progress(progress)
+        self.score_manager.write_failed_docking_summary(FAILED_DOCKINGS)
+        exit(0)
+
+    def update_from_globals(self):
+        self.update_progress({
+            "COMPARISON_LIGAND_INDEX": globals().get("COMPARISON_LIGAND_INDEX", 0),
+            "COMPARISON_PROTEIN_INDEX": globals().get("COMPARISON_PROTEIN_INDEX", 0),
+            "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
+            "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
+            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0)
+        })
+
+class DockingTask:
+    def __init__(self, ligand_file, protein_file, model_index, config, results_dir, debug, score_manager):
+        self.ligand_file = ligand_file
+        self.protein_file = protein_file
+        self.model_index = model_index
+        self.config = config
+        self.results_dir = results_dir
+        self.debug = debug
+        self.score_manager = score_manager
+
+    def run(self):
+        ligand_name = Path(self.ligand_file).stem
+        protein_name = Path(self.protein_file).stem
+        output_file = self.results_dir / f"temp/{ligand_name}_model{self.model_index}_vs_{protein_name}.pdbqt"
+        log_file = self.results_dir / f"temp/{ligand_name}_model{self.model_index}_vs_{protein_name}.log"
+
+        (self.results_dir / "temp").mkdir(parents=True, exist_ok=True)
+        protein_manager = ProteinManager(PROTEIN_DIR)
+        center_x, center_y, center_z, size_x, size_y, size_z = protein_manager.calculate_docking_box(self.protein_file)
+
+        if self.debug:
+            print("Running AutoDock Vina with the following parameters:")
+            print(f"Receptor: {self.protein_file}")
+            print(f"Ligand: {self.ligand_file}")
+            print(f"Center: {center_x}, {center_y}, {center_z}")
+            print(f"Size: {size_x}, {size_y}, {size_z}")
+            print(f"Output: {output_file}")
+            print(f"Log: {log_file}")
+
+        vina_command = [
+            "vina",
+            "--receptor", str(self.protein_file),
+            "--ligand", str(self.ligand_file),
+            "--center_x", str(center_x),
+            "--center_y", str(center_y),
+            "--center_z", str(center_z),
+            "--size_x", str(size_x),
+            "--size_y", str(size_y),
+            "--size_z", str(size_z),
+            "--out", str(output_file)
+        ]
+
+        if "cpu" in self.config:
+            vina_command += ["--cpu", self.config["cpu"]]
+        if "exhaustiveness" in self.config:
+            vina_command += ["--exhaustiveness", self.config["exhaustiveness"]]
+        if "energy_range" in self.config:
+            vina_command += ["--energy_range", self.config["energy_range"]]
+        if "num_modes" in self.config:
+            vina_command += ["--num_modes", self.config["num_modes"]]
+
+        with open(log_file, "w") as log:
+            vina_process = subprocess.Popen(vina_command, stdout=log, stderr=log)
+
+        docking_monitor = DockingProgressMonitor(display_manager)
+        docking_monitor.monitor(log_file)
+        vina_process.wait()
+
+        if not log_file.exists():
+            print(f"Error: Log file not found: {log_file}")
+            FAILED_DOCKINGS.append((ligand_name, protein_name))
+            return
+
+        if self.debug:
+            display_manager.move_cursor(shutil.get_terminal_size((80, 20)).lines - 1, 0)
+            print(f"Contents of log file {log_file}:")
+            with open(log_file, "r") as log:
+                print(log.read())
+
+        score = None
+        with open(log_file, "r") as log:
+            for line in log:
+                if line.startswith("   1"):
+                    score = line.split()[1]
+                    break
+
+        log_manager.log(f"Docking completed for {ligand_name} with {protein_name}. Score: {score}")
+
+        if score and (score.replace(".", "", 1).replace("-", "", 1).isdigit() or score == "-"):
+            log_manager.log(f"   Valid score extracted: {score} for ligand: {ligand_name} with protein: {protein_name}")
+            if self.debug:
+                print(f"Extracted score: {score} for ligand: {ligand_name} with protein: {protein_name}")
+            SCORES_DIR = self.results_dir / "scores"
+            if not SCORES_DIR.exists():
+                SCORES_DIR.mkdir(parents=True, exist_ok=True)
+            scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
+            header = "# Score  Ligand\n"
+            if not scores_file.exists() or os.path.getsize(scores_file) == 0:
+                with open(scores_file, "w") as f:
+                    f.write(header)
+            with open(scores_file, "a") as f:
+                f.write(f"{score} {ligand_name}\n")
+            self.score_manager.update_sorted_scores(scores_file)
+            self.score_manager.write_stats(scores_file)
+            self.score_manager.write_scores_csv(scores_file)
+            if self.debug:
+                print(f"Score stored in {scores_file}")
+        else:
+            log_manager.log(f"Failed to extract a valid score from log file: {log_file}")
+            print(f"Failed to extract a valid score from log file: {log_file}")
+            FAILED_DOCKINGS.append((ligand_name, protein_name))
+
+        ligand_name = Path(self.ligand_file).stem.split(".")[0]
+        model_part = ""
+        if "_model_" in Path(self.ligand_file).stem:
+            model_part = Path(self.ligand_file).stem.split("_model_")[-1]
+            dest_dir = self.results_dir / "docked_ligands" / f"docked_{ligand_name}" / f"docked_{ligand_name}_model{model_part}"
+        else:
+            dest_dir = self.results_dir / "docked_ligands" / f"docked_{ligand_name}"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(output_file), dest_dir / output_file.name)
+        shutil.move(str(log_file), dest_dir / log_file.name)
+
+        env_info = f"Python version: {sys.version}"
+        self.score_manager.write_metadata(dest_dir, vina_command, env_info)
+
+class ResultOrganizer:
+    def __init__(self, results_dir):
+        self.results_dir = results_dir
+
+    def move_temp_files(self):
+        temp_dir = self.results_dir / "temp"
+        DOCKED_LIGANDS_DIR = self.results_dir / "docked_ligands"
+        DOCKED_LIGANDS_DIR.mkdir(parents=True, exist_ok=True)
+        for file in temp_dir.glob("*"):
+            parts = file.stem.split("_vs_")[0].split("_model")
+            ligand_base = parts[0]
+            model_part = f"model{parts[1]}" if len(parts) > 1 else None
+            ligand_base_clean = ligand_base.split(".")[0]
+            if model_part:
+                dest_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_base_clean}" / f"docked_{ligand_base_clean}_{model_part}"
+            else:
+                dest_dir = DOCKED_LIGANDS_DIR / f"docked_{ligand_base_clean}"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(file), dest_dir / file.name)
+
+class DisplayManager:
+    def __init__(self):
+        pass
+
+    def display_progress(self, current_task, total_tasks, ligand_index, total_ligands, model_index, total_models, protein_index, total_proteins, ligand_name, protein_name):
+        """
+        Display the progress of the docking process with an estimated time to completion (ETC).
+        :param current_task: Current task number.
+        :param total_tasks: Total number of tasks.
+        :param ligand_index: Current ligand index.
+        :param total_ligands: Total number of ligands.
+        :param model_index: Current model index.
+        :param total_models: Total number of models.
+        :param protein_index: Current protein index.
+        :param total_proteins: Total number of proteins.
+        :param ligand_name: Name of the current ligand.
+        :param protein_name: Name of the current protein.
+        """
+        console_width = shutil.get_terminal_size((80, 20)).columns
+        progress_bar_length = console_width - 30
+
+        # Calculate elapsed time for the last 10 tasks
+        if TASK_DURATIONS:
+            avg_task_time = sum(TASK_DURATIONS) / len(TASK_DURATIONS)
+        else:
+            avg_task_time = 0
+
+        remaining_tasks = total_tasks - current_task
+        remaining_time = avg_task_time * remaining_tasks if avg_task_time > 0 else 0
+
+        # Format remaining time as HH:MM:SS
+        hours, rem = divmod(int(remaining_time), 3600)
+        minutes, seconds = divmod(rem, 60)
+        etc = f"{hours:02}:{minutes:02}:{seconds:02}"
+
+        print("\033[H\033[J", end="")  # Clear the terminal
+        print("========================================")
+        print("         Protein-Ligand Docking         ")
+        print("========================================")
+        print()
+        print(f"Docking:")
+        print(f"Ligand file {ligand_index + 1}/{total_ligands}")
+        self.draw_progress_bar(7, 0, progress_bar_length, ligand_index + 1, total_ligands, False)
+
+        self.move_cursor(9, 0)
+        print(f"Ligand model: model {model_index + 1}/{total_models}")
+        self.draw_progress_bar(10, 0, progress_bar_length, model_index + 1, total_models, False)
+
+        self.move_cursor(12, 0)
+        print(f"Ligand progress: protein {protein_index + 1}/{total_proteins}")
+        self.draw_progress_bar(13, 0, progress_bar_length, protein_index + 1, total_proteins, False)
+
+        # Current docking progress bar
+        self.move_cursor(15, 0)
+        print("Current docking progress:")
+        self.draw_progress_bar(16, 0, progress_bar_length, 0, 100, False)
+
+        self.move_cursor(19, 0)
+        print(f"Ligand name: {ligand_name}")
+        print(f"Protein name: {protein_name}")
+
+        percent_through_dock = (current_task * 100) / total_tasks
+        self.move_cursor(21, 0)
+        print(f"Total progress: {current_task}/{total_tasks}")
+        self.draw_progress_bar(22, 0, progress_bar_length, current_task, total_tasks, False)
+
+        # Display estimated time to completion
+        self.move_cursor(24, 0)
+        print(f"Estimated time to completion: {etc}")
+
+        self.move_cursor(26, 0)
+        print("Do CTRL+C to exit")
+
+    def display_comparison_progress(self, current_task, total_tasks, comparison_ligand_index, total_comparison_ligands, protein_index, total_proteins, comparison_ligand_name, protein_name):
+        """
+        Display the progress of docking for comparison ligands.
+        :param current_task: Current task number.
+        :param total_tasks: Total number of tasks.
+        :param comparison_ligand_index: Current comparison ligand index.
+        :param total_comparison_ligands: Total number of comparison ligands.
+        :param protein_index: Current protein index.
+        :param total_proteins: Total number of proteins.
+        :param comparison_ligand_name: Name of the current comparison ligand.
+        :param protein_name: Name of the current protein.
+        """
+        console_width = shutil.get_terminal_size((80, 20)).columns
+        progress_bar_length = console_width - 30
+
+        print("\033[H\033[J", end="")  # Clear the terminal
+        print("========================================")
+        print("   Initial Calculation of Comparison    ")
+        print("========================================")
+        print()
+        print(f"Docking comparisons:")
+        print(f"Total progress: comparison ligand {comparison_ligand_index + 1}/{total_comparison_ligands}")
+        self.draw_progress_bar(7, 0, progress_bar_length, comparison_ligand_index + 1, total_comparison_ligands, False)
+        self.move_cursor(9, 0)
+        print(f"Comparison ligand progress: protein {protein_index + 1}/{total_proteins}")
+        self.draw_progress_bar(10, 0, progress_bar_length, protein_index + 1, total_proteins, False)
+        self.move_cursor(19, 0)
+        print(f"Comparison ligand name: {comparison_ligand_name}")
+        print(f"Protein name: {protein_name}")
+
+        percent_through_dock = (current_task * 100) / total_tasks
+        self.move_cursor(21, 0)
+        print(f"% through dock: {percent_through_dock:.2f}%")
+        self.draw_progress_bar(22, 0, progress_bar_length, current_task, total_tasks, False)
+
+        self.move_cursor(24, 0)
+        print("Do CTRL+C to exit")
+        print()
+
+    def draw_progress_bar(self, row, col, length, current, total, waits=False):
+        """
+        Draw a progress bar in the terminal.
+        :param row: Cursor row position for the progress bar.
+        :param col: Cursor column position for the progress bar.
+        :param length: Length of the progress bar.
+        :param current: Current progress value.
+        :param total: Total progress value.
+        :param waits: Optional flag to wait after each character (default: False).
+        """
+        # Check if the current value exceeds the total value
+        if current > total:
+            current = total
+
+        # Check if the current value is negative
+        if current < 0:
+            current = 0
+
+        # Check if the progress bar length is valid
+        if length <= 0:
+            print("Error: Progress bar length must be greater than 0.")
+            return
+
+        # Check if the current and total values are valid
+        if current < 0 or total <= 0:
+            print("Error: Progress bar current and total values must be non-negative, and total must be greater than 0.")
+            return
+
+        # Calculate progress as a fraction (0 to 1)
+        progress = current / total
+
+        # Calculate the number of filled and empty segments
+        filled = int(progress * length)
+        empty = length - filled
+
+        # Draw the progress bar
+        bar = "[" + "\033[42m \033[0m" * filled + "\033[41m \033[0m" * empty + "]"
+        percent = f"{progress * 100:.2f}%"
+
+        # Move the cursor to the specified position and print the progress bar
+        print(f"\033[{row};{col}H{bar} {percent}", end="", flush=True)
+
+    def clear_display_area(self):
+        """
+        Clear the display area in the terminal.
+        """
+        console_height = shutil.get_terminal_size((80, 20)).lines
+        console_width = shutil.get_terminal_size((80, 20)).columns
+        print("\033[H", end="")  # Move cursor to the top left corner
+        for _ in range(console_height):
+            print(" " * console_width)
+        print("\033[H", end="")  # Move cursor back to the top left corner
+
+    def move_cursor(self, row, col):
+        """
+        Move the cursor to a specific row and column in the terminal.
+        :param row: The row number (1-based).
+        :param col: The column number (1-based).
+        """
+        print(f"\033[{row};{col}H", end="", flush=True)
+
+    def add_empty_lines(self):
+        """
+        Add empty lines to create space for display updates.
+        """
+        console_height = shutil.get_terminal_size((80, 20)).lines
+        for _ in range(console_height):
+            print()
+
+    @staticmethod
+    def wait_for_render_stop():
+        global IS_RENDERING
+        while IS_RENDERING:
+            time.sleep(0.01)
 
 # Register the termination signal handler
-signal.signal(signal.SIGINT, terminate_script)
-signal.signal(signal.SIGTERM, terminate_script)
+progress_manager = ProgressManager(PROGRESS_CACHE, ScoreManager(RESULTS_DIR))
+signal.signal(signal.SIGINT, progress_manager.terminate_script)
+signal.signal(signal.SIGTERM, progress_manager.terminate_script)
 
-# Function to read configuration file
-def read_config(config_path=CONFIG_DIR / "config.txt"):
-    config = {}
-    if not Path(config_path).exists():
-        print(f"Warning: Config file {config_path} not found. Using defaults.")
-        return config
-    with open(config_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, value = line.split("=", 1)
-                config[key.strip()] = value.strip()
-    return config
+# Initialize DisplayManager
+display_manager = DisplayManager()
 
-def validate_and_report_config(config, expected_keys=None):
-    if expected_keys is None:
-        expected_keys = ["cpu", "exhaustiveness", "energy_range", "num_modes"]
-    print("Configuration loaded:")
-    for key in expected_keys:
-        if key in config:
-            print(f"  {key}: {config[key]}")
-        else:
-            print(f"  WARNING: {key} not set in config file!")
+# Initialize LogManager
+log_manager = LogManager(LOG_FILE)
 
-def clean_ligand_name(name):
-    return name.split(".")[0].replace(" ", "_")
-
-def update_sorted_scores(scores_file):
-    with open(scores_file, "r") as f:
-        lines = [line for line in f if not line.startswith("#")]
-    sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]))
-    with open(scores_file, "w") as f:
-        f.write("# Score  Ligand\n")
-        f.writelines(sorted_lines)
-
-def write_stats(scores_file):
-    with open(scores_file) as f:
-        scores = [float(line.split()[0]) for line in f if not line.startswith("#")]
-    if scores:
-        mean = statistics.mean(scores)
-        median = statistics.median(scores)
-        stdev = statistics.stdev(scores) if len(scores) > 1 else 0
-        stats_file = scores_file.parent / (scores_file.stem + "_stats.txt")
-        with open(stats_file, "w") as f:
-            f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
-
-def write_metadata(dest_dir, vina_command, env_info):
-    with open(dest_dir / "metadata.txt", "w") as f:
-        f.write("Vina command:\n")
-        f.write(" ".join(vina_command) + "\n")
-        f.write("Environment:\n")
-        f.write(env_info + "\n")
-
-def write_ligand_stats(ligand_file, proteins):
-    ligand_name = Path(ligand_file).stem
-    scores = []
-    for protein_file in proteins:
-        protein_name = Path(protein_file).stem
-        scores_file = RESULTS_DIR / f"scores_{protein_name}.txt"
-        if scores_file.exists():
-            with open(scores_file) as f:
-                for line in f:
-                    if line.startswith("#"): continue
-                    if ligand_name in line:
-                        scores.append(float(line.split()[0]))
-                        break
-    if scores:
-        mean = statistics.mean(scores)
-        median = statistics.median(scores)
-        stdev = statistics.stdev(scores) if len(scores) > 1 else 0
-        stats_file = RESULTS_DIR / "scores" / "ligands" / f"{ligand_name}_stats.txt"
-        stats_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(stats_file, "w") as f:
-            f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
-
-def write_ligand_protein_scores(ligands, proteins):
-    SCORES_DIR = RESULTS_DIR / "scores" / "ligands"
-    SCORES_DIR.mkdir(parents=True, exist_ok=True)
-    for ligand_file in ligands:
-        ligand_name = Path(ligand_file).stem
-        out_file = SCORES_DIR / f"scores_{ligand_name}.txt"
-        with open(out_file, "w") as f:
-            f.write("# Score  Protein\n")
-            for protein_file in proteins:
-                protein_name = Path(protein_file).stem
-                scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
-                score = None
-                if scores_file.exists():
-                    with open(scores_file) as sf:
-                        for line in sf:
-                            if line.startswith("#"): continue
-                            if ligand_name in line:
-                                score = line.split()[0]
-                                break
-                if score is not None:
-                    f.write(f"{score} {protein_name}\n")
-
-def write_comparison_ligand_protein_scores(comparison_ligands, proteins):
-    SCORES_DIR = RESULTS_DIR / "scores" / "comparison_ligands"
-    SCORES_DIR.mkdir(parents=True, exist_ok=True)
-    for comp_lig_file in comparison_ligands:
-        comp_lig_name = Path(comp_lig_file).stem
-        out_file = SCORES_DIR / f"scores_{comp_lig_name}.txt"
-        with open(out_file, "w") as f:
-            f.write("# Score  Protein\n")
-            for protein_file in proteins:
-                protein_name = Path(protein_file).stem
-                scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
-                score = None
-                if scores_file.exists():
-                    with open(scores_file) as sf:
-                        for line in sf:
-                            if line.startswith("#"): continue
-                            if comp_lig_name in line:
-                                score = line.split()[0]
-                                break
-                if score is not None:
-                    f.write(f"{score} {protein_name}\n")
-
-def write_summary_file(ligands, proteins, comparison_ligands):
-    summary_file = RESULTS_DIR / "summary.txt"
-    with open(summary_file, "w") as f:
-        f.write("Ligands:\n")
-        for ligand in ligands:
-            f.write(f"  {Path(ligand).stem}\n")
-        f.write("\nProteins:\n")
-        for protein in proteins:
-            f.write(f"  {Path(protein).stem}\n")
-        f.write("\nComparison Ligands:\n")
-        for comp in comparison_ligands:
-            f.write(f"  {Path(comp).stem}\n")
-
-def write_per_protein_comparison_ligand_rankings(ligands, proteins, comparison_ligands):
-    SCORES_DIR = RESULTS_DIR / "scores"
-    for comp_lig_file in comparison_ligands:
-        comp_lig_name = Path(comp_lig_file).stem
-        for protein_file in proteins:
-            protein_name = Path(protein_file).stem
-            scores_file = SCORES_DIR / f"scores_{protein_name}.txt"
-            comp_score = None
-            if not scores_file.exists():
-                continue
-            with open(scores_file) as f:
-                for line in f:
-                    if line.startswith("#"): continue
-                    if comp_lig_name in line:
-                        comp_score = float(line.split()[0])
-                        break
-            if comp_score is None:
-                continue
-            diffs = []
-            with open(scores_file) as f:
-                for line in f:
-                    if line.startswith("#"): continue
-                    score, lig_name = line.split()
-                    diff = float(score) - comp_score
-                    diffs.append((abs(diff), diff, lig_name))
-            diffs.sort()
-            ranked_file = SCORES_DIR / f"scores_{comp_lig_name}_in_{protein_name}_ranked.txt"
-            with open(ranked_file, "w") as f:
-                f.write(f"# Generated: {time.ctime()}\n")
-                f.write("# ScoreDiff  Ligand\n")
-                for _, diff, lig_name in diffs:
-                    f.write(f"{diff:.4f} {lig_name}\n")
-
-def write_ligand_rms_to_comparison(ligands, proteins, comparison_ligands):
-    SCORES_DIR = RESULTS_DIR / "scores"
-    OUT_DIR = SCORES_DIR / "ligands"
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for ligand_file in ligands:
-        ligand_name = Path(ligand_file).stem
-        out_file = OUT_DIR / f"{ligand_name}_RMS_to_comparison_ligands.txt"
-        with open(out_file, "w") as f:
-            f.write(f"# Generated: {time.ctime()}\n")
-            f.write("# ComparisonLigand  RMS\n")
-            for comp_lig_file in comparison_ligands:
-                comp_lig_name = Path(comp_lig_file).stem
-                rms_file = SCORES_DIR / f"scores_{comp_lig_name}_RMS.txt"
-                rms_value = None
-                if rms_file.exists():
-                    with open(rms_file) as rf:
-                        for line in rf:
-                            if line.startswith("#"): continue
-                            if ligand_name in line:
-                                rms_value = float(line.split()[0])
-                                break
-                if rms_value is not None:
-                    f.write(f"{comp_lig_name} {rms_value:.4f}\n")
-
-def write_failed_docking_summary():
-    out_file = RESULTS_DIR / "failed_docking_attempts.txt"
-    with open(out_file, "w") as f:
-        f.write(f"# Generated: {time.ctime()}\n")
-        f.write("# Ligand  Protein\n")
-        for ligand, protein in FAILED_DOCKINGS:
-            f.write(f"{ligand} {protein}\n")
-
-def write_scores_csv(scores_file):
-    csv_file = scores_file.with_suffix('.csv')
-    with open(scores_file) as fin, open(csv_file, "w") as fout:
-        fout.write("Score,Ligand\n")
-        for line in fin:
-            if line.startswith("#"): continue
-            fout.write(",".join(line.strip().split()) + "\n")
+# Instantiate LigandManager
+ligand_manager = LigandManager(LIGAND_DIR, CACHE_DIR)
 
 # Main script execution
 if __name__ == "__main__":
     import sys
 
     # Handle command-line arguments for clearing cache
+    cache_manager = CacheManager(CACHE_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
     if "--clear-cache" in sys.argv:
-        initialize_cache("clear")
+        cache_manager.initialize_cache("clear")
     elif "--clear-everything" in sys.argv:
-        initialize_cache("clear-everything")
+        cache_manager.initialize_cache("clear-everything")
     else:
-        initialize_cache()
+        cache_manager.initialize_cache()
 
     # Read progress from cache
-    progress = read_progress()
+    progress = progress_manager.read_progress()
     COMPARISON_LIGAND_INDEX = progress.get("COMPARISON_LIGAND_INDEX", 0)
     COMPARISON_PROTEIN_INDEX = progress.get("COMPARISON_PROTEIN_INDEX", 0)
     LIGAND_INDEX = progress.get("LIGAND_INDEX", 0)
@@ -1099,6 +1089,22 @@ if __name__ == "__main__":
     # Create a dedicated subfolder for output files
     (RESULTS_DIR / "temp").mkdir(parents=True, exist_ok=True)
 
+    # Extract models for all ligands first
+    for ligand_file in ligands:
+        ligand_manager.extract_models(ligand_file)
+
+    # Now count models for all ligands
+    all_models = []
+    for ligand_file in ligands:
+        models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
+        all_models.append(len(models))
+
+    total_tasks = sum(n_models * total_proteins for n_models in all_models)
+
+    if total_tasks == 0:
+        print("No docking tasks to perform. Check your ligand/model extraction.")
+        exit(1)
+
     # Perform docking for comparison ligands
     while COMPARISON_LIGAND_INDEX < total_comparison_ligands:
         comparison_ligand_file = comparison_ligands[COMPARISON_LIGAND_INDEX]
@@ -1115,17 +1121,11 @@ if __name__ == "__main__":
                     if any(comparison_ligand_name in line for line in f):
                         print(f"Skipping docking for {comparison_ligand_name} with {protein_name} (already completed).")
                         COMPARISON_PROTEIN_INDEX += 1
-                        update_progress({
-                            "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-                            "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-                            "LIGAND_INDEX": LIGAND_INDEX,
-                            "MODEL_INDEX": MODEL_INDEX,
-                            "PROTEIN_INDEX": PROTEIN_INDEX
-                        })
+                        progress_manager.update_from_globals()
                         continue
 
             # Display progress for comparison ligands
-            display_comparison_progress(
+            display_manager.display_comparison_progress(
                 current_task=COMPARISON_LIGAND_INDEX * total_proteins + COMPARISON_PROTEIN_INDEX + 1,
                 total_tasks=total_comparison_ligands * total_proteins,
                 comparison_ligand_index=COMPARISON_LIGAND_INDEX,
@@ -1137,32 +1137,21 @@ if __name__ == "__main__":
             )
 
             # Perform docking
-            perform_docking(comparison_ligand_file, protein_file, 0)
+            docking_task = DockingTask(comparison_ligand_file, protein_file, 0, {}, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
+            docking_task.run()
 
             # Update progress after each docking task
             COMPARISON_PROTEIN_INDEX += 1
-            update_progress({
-                "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-                "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-                "LIGAND_INDEX": LIGAND_INDEX,
-                "MODEL_INDEX": MODEL_INDEX,
-                "PROTEIN_INDEX": PROTEIN_INDEX
-            })
+            progress_manager.update_from_globals()
 
         # Reset protein index and move to the next comparison ligand
         COMPARISON_PROTEIN_INDEX = 0
         COMPARISON_LIGAND_INDEX += 1
-        update_progress({
-            "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-            "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-            "LIGAND_INDEX": LIGAND_INDEX,
-            "MODEL_INDEX": MODEL_INDEX,
-            "PROTEIN_INDEX": PROTEIN_INDEX
-        })
+        progress_manager.update_from_globals()
 
     # Clear the display area after comparison ligand docking
     if(not DEBUG):
-        clear_display_area()
+        display_manager.clear_display_area()
 
     # start time for docking
     start_time = time.time()
@@ -1170,12 +1159,10 @@ if __name__ == "__main__":
     # Perform docking for ligands
     while LIGAND_INDEX < total_ligands:
         ligand_file = ligands[LIGAND_INDEX]
-        extract_models(ligand_file)
+        ligand_manager.extract_models(ligand_file)  # <-- FIXED
         models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
         total_models = len(models)
 
-        # Calculate total docking tasks
-        total_tasks = total_ligands * total_models * total_proteins
         current_task = (
             LIGAND_INDEX * total_models * total_proteins +
             MODEL_INDEX * total_proteins +
@@ -1193,7 +1180,7 @@ if __name__ == "__main__":
                 protein_name = Path(protein_file).stem
 
                 # Display progress before starting docking
-                display_progress(
+                display_manager.display_progress(
                     current_task=current_task,
                     total_tasks=total_tasks,
                     ligand_index=LIGAND_INDEX,
@@ -1207,8 +1194,8 @@ if __name__ == "__main__":
                 )
 
                 # Perform docking
-                perform_docking(model_file, protein_file, MODEL_INDEX)
-
+                docking_task = DockingTask(model_file, protein_file, MODEL_INDEX, {}, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
+                docking_task.run()
 
                 end_time = time.time()
                 # Record task duration
@@ -1217,79 +1204,65 @@ if __name__ == "__main__":
                 # Update progress
                 current_task += 1
                 PROTEIN_INDEX += 1
-                update_progress({
-                    "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-                    "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-                    "LIGAND_INDEX": LIGAND_INDEX,
-                    "MODEL_INDEX": MODEL_INDEX,
-                    "PROTEIN_INDEX": PROTEIN_INDEX
-                })
+                progress_manager.update_from_globals()
 
             PROTEIN_INDEX = 0
             MODEL_INDEX += 1
-            update_progress({
-                "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-                "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-                "LIGAND_INDEX": LIGAND_INDEX,
-                "MODEL_INDEX": MODEL_INDEX,
-                "PROTEIN_INDEX": PROTEIN_INDEX
-            })
+            progress_manager.update_from_globals()
 
         MODEL_INDEX = 0
         LIGAND_INDEX += 1
-        update_progress({
-            "COMPARISON_LIGAND_INDEX": COMPARISON_LIGAND_INDEX,
-            "COMPARISON_PROTEIN_INDEX": COMPARISON_PROTEIN_INDEX,
-            "LIGAND_INDEX": LIGAND_INDEX,
-            "MODEL_INDEX": MODEL_INDEX,
-            "PROTEIN_INDEX": PROTEIN_INDEX
-        })
+        progress_manager.update_from_globals()
 
     # Move temporary files to the results directory
-    move_temp_files()
+    result_organizer = ResultOrganizer(RESULTS_DIR)
+    result_organizer.move_temp_files()
+
+    # Initialize ScoreManager
+    score_manager = ScoreManager(RESULTS_DIR)
 
     # Calculate and save top dockers for each protein
-    calculate_top_dockers(proteins)
+    score_manager.calculate_top_dockers(proteins)
 
     # Generate comparison scores
-    generate_comparison_scores(ligands, proteins, comparison_ligands)
+    score_manager.generate_comparison_scores(ligands, proteins, comparison_ligands)
 
     # Calculate and save the best ligands
-    calculate_best_ligands(ligands, proteins, comparison_ligands)
+    score_manager.calculate_best_ligands(ligands, proteins, comparison_ligands)
 
     # Rank and display the best ligands
-    rank_and_display_best_ligands()
+    score_manager.rank_and_display_best_ligands()
 
     # Generate per-ligand/model score summaries
-    generate_ligand_score_summaries(ligands, proteins, comparison_ligands)
+    score_manager.generate_ligand_score_summaries(ligands, proteins, comparison_ligands)
 
     # Write ligand-protein scores
-    write_ligand_protein_scores(ligands, proteins)
+    score_manager.write_ligand_protein_scores(ligands, proteins)
 
     # Write comparison ligand-protein scores
-    write_comparison_ligand_protein_scores(comparison_ligands, proteins)
+    score_manager.write_comparison_ligand_protein_scores(comparison_ligands, proteins)
 
     # Write summary file
-    write_summary_file(ligands, proteins, comparison_ligands)
+    score_manager.write_summary_file(ligands, proteins, comparison_ligands)
 
     # Write per-protein comparison ligand rankings
-    write_per_protein_comparison_ligand_rankings(ligands, proteins, comparison_ligands)
+    score_manager.write_per_protein_comparison_ligand_rankings(ligands, proteins, comparison_ligands)
 
     # Write RMS to comparison ligands for each ligand
-    write_ligand_rms_to_comparison(ligands, proteins, comparison_ligands)
+    score_manager.write_ligand_rms_to_comparison(ligands, proteins, comparison_ligands)
 
     for ligand_file in ligands:
-        write_ligand_stats(ligand_file, proteins)
+        score_manager.write_ligand_stats(ligand_file, proteins)
 
     # Write failed docking summary
-    write_failed_docking_summary()
+    score_manager.write_failed_docking_summary(FAILED_DOCKINGS)
 
     # Write CSVs for all scores_<protein_name>.txt files
     for protein_file in proteins:
         protein_name = Path(protein_file).stem
         scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
         if scores_file.exists():
-            write_scores_csv(scores_file)
+            score_manager.write_scores_csv(scores_file)
 
 print("End of program")
 
@@ -1352,7 +1325,7 @@ print("End of program")
 # for each comparison ligand:
 #   for each protein:
 #       get score for that comparison ligand to that protein
-#       save the score in directory dock/results/scores/comparison_ligands in file scores_<comparison_ligand_name>.txt
+#       save the score in directory dock/results/scores/comparison_ligands in file scores_<comparisonLigand_name>.txt
 #       save the score in the format <score> <protein_name> on each line
 
 # Ligands protien scores per ligand:
