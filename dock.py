@@ -46,9 +46,9 @@ TASK_DURATIONS = deque(maxlen=30)  # Store durations for the last 30 tasks
 # Global variable to track failed docking attempts
 FAILED_DOCKINGS = []
 
-class CacheManager:
-    def __init__(self, cache_dir, results_dir, ligand_dir, protein_dir, comparison_ligand_dir):
-        self.cache_dir = cache_dir
+CONFIG_PATH = CONFIG_DIR / "config.txt"
+if not CONFIG_PATH.exists():
+    with open(CONFIG_PATH, "w") as f:
         self.results_dir = results_dir
         self.ligand_dir = ligand_dir
         self.protein_dir = protein_dir
@@ -622,7 +622,7 @@ class LigandManager:
         ligand_name = Path(ligand_file).stem
         output_dir = self.cache_dir / f"models_{ligand_name}"
         output_dir.mkdir(parents=True, exist_ok=True)
-        if list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
+        if list(output_dir.glob("*.pdbqt")):
             print(f"Models for {ligand_name} already extracted.")
             return
         with open(ligand_file) as f:
@@ -647,7 +647,8 @@ class LigandManager:
                     new_name = f"{ligand_name}_model_{model_index}.pdbqt"
                     model_file.rename(output_dir / new_name)
             else:
-                shutil.copy(ligand_file, output_dir / f"{ligand_name}_model_1.pdbqt")
+                # Use base name for single-model ligands
+                shutil.copy(ligand_file, output_dir / f"{ligand_name}.pdbqt")
 
     @staticmethod
     def clean_ligand_name(name):
@@ -1041,7 +1042,72 @@ class DisplayManager:
         global IS_RENDERING
         while IS_RENDERING:
             time.sleep(0.01)
+class CacheManager:
+    def __init__(self, cache_dir, results_dir, ligand_dir, protein_dir, comparison_ligand_dir):
+        self.cache_dir = cache_dir
+        self.results_dir = results_dir
+        self.ligand_dir = ligand_dir
+        self.protein_dir = protein_dir
+        self.comparison_ligand_dir = comparison_ligand_dir
 
+    def initialize_cache(self, mode=None):
+        if mode == "clear":
+            backup_dir = self.cache_dir / "cache_backup"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for item in self.cache_dir.iterdir():
+                if item == backup_dir:
+                    continue
+                destination = backup_dir / item.name
+                if destination.exists():
+                    counter = 1
+                    new_name = f"{item.stem}_copy{counter}{item.suffix}"
+                    new_destination = backup_dir / new_name
+                    while new_destination.exists():
+                        counter += 1
+                        new_name = f"{item.stem}_copy{counter}{item.suffix}"
+                        new_destination = backup_dir / new_name
+                    destination = new_destination
+                shutil.move(str(item), str(destination))
+            print("Cache cleared and backed up.")
+        elif mode == "clear-everything":
+            shutil.rmtree(self.cache_dir, ignore_errors=True)
+            shutil.rmtree(self.results_dir, ignore_errors=True)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+            print("Cache and results cleared.")
+
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate ligand and protein name lists
+        ligand_names = self.cache_dir / "ligandNames.txt"
+        protein_names = self.cache_dir / "proteinNames.txt"
+        comparison_ligand_names = self.cache_dir / "comparisonLigandNames.txt"
+        progress_cache = self.cache_dir / "progress_cache.txt"
+
+        if not list(self.ligand_dir.glob("*.pdbqt")):
+            print(f"Error: No ligand files found in {self.ligand_dir}")
+            exit(1)
+        with open(ligand_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.ligand_dir.glob("*.pdbqt")])
+
+        if not list(self.protein_dir.glob("*.pdbqt")):
+            print(f"Error: No protein files found in {self.protein_dir}")
+            exit(1)
+        with open(protein_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.protein_dir.glob("*.pdbqt")])
+
+        if not list(self.comparison_ligand_dir.glob("*.pdbqt")):
+            print(f"Error: No comparison ligand files found in {self.comparison_ligand_dir}")
+            exit(1)
+        with open(comparison_ligand_names, "w") as f:
+            f.writelines([str(file) + "\n" for file in self.comparison_ligand_dir.glob("*.pdbqt")])
+
+        if not progress_cache.exists():
+            with open(progress_cache, "w") as f:
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
+
+                
 # Register the termination signal handler
 progress_manager = ProgressManager(PROGRESS_CACHE, ScoreManager(RESULTS_DIR))
 signal.signal(signal.SIGINT, progress_manager.terminate_script)
@@ -1161,6 +1227,8 @@ if __name__ == "__main__":
         ligand_file = ligands[LIGAND_INDEX]
         ligand_manager.extract_models(ligand_file)  # <-- FIXED
         models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
+        for model_file in models:
+            model_name = Path(model_file).stem
         total_models = len(models)
 
         current_task = (
@@ -1263,6 +1331,25 @@ if __name__ == "__main__":
         scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
         if scores_file.exists():
             score_manager.write_scores_csv(scores_file)
+
+    # After all scoring and summaries
+    ranked_dir = RESULTS_DIR / "ranked_best_ligands"
+    ranked_dir.mkdir(parents=True, exist_ok=True)
+
+    for comp_lig_file in comparison_ligands:
+        comp_lig_name = Path(comp_lig_file).stem
+        rms_file = RESULTS_DIR / "scores" / f"scores_{comp_lig_name}_RMS.txt"
+        ranked_file = ranked_dir / f"ranked_best_ligands_{comp_lig_name}.txt"
+        if rms_file.exists():
+            with open(rms_file) as f:
+                lines = [line for line in f if not line.startswith("#") and line.strip()]
+            sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]))
+            with open(ranked_file, "w") as f:
+                f.writelines(sorted_lines)
+            print(f"Top ligands as substitutes for {comp_lig_name} saved to {ranked_file}.")
+            print(f"Top 5 ligands as substitutes for {comp_lig_name}:")
+            for line in sorted_lines[:5]:
+                print(line.strip())
 
 print("End of program")
 
