@@ -218,8 +218,9 @@ class ScoreManager:
             lines = [line for line in f if not line.startswith("#")]
         sorted_lines = sorted(lines, key=lambda x: float(x.split()[0]))
         with open(scores_file, "w") as f:
-            f.write("# Score  Ligand\n")
-            f.writelines(sorted_lines)
+            write_header(f, "Docking scores for all ligands against this protein.", columns=["Score", "Ligand"])
+            for line in sorted_lines:
+                f.write(line)
 
     def write_stats(self, scores_file):
         # Write statistics file
@@ -234,9 +235,9 @@ class ScoreManager:
                 f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
 
     def write_scores_csv(self, scores_file):
-        # Write CSV version
         csv_file = scores_file.with_suffix('.csv')
         with open(scores_file) as fin, open(csv_file, "w") as fout:
+            write_header(fout, "CSV version of docking scores for this protein.", columns=["Score", "Ligand"])
             fout.write("Score,Ligand\n")
             for line in fin:
                 if line.startswith("#"): continue
@@ -266,7 +267,7 @@ class ScoreManager:
                 f.write(f"Mean: {mean}\nMedian: {median}\nStdDev: {stdev}\n")
 
     def write_ligand_protein_scores(self, ligands, proteins):
-        # Write per-ligand/protein scores
+        # Write per-ligand stats
         SCORES_DIR = self.scores_dir / "ligands"
         SCORES_DIR.mkdir(parents=True, exist_ok=True)
         for ligand_file in ligands:
@@ -491,7 +492,7 @@ class ScoreManager:
                 rms_list.append((rms, lig_name))
             rms_list.sort()
             with open(rms_file, "w") as f:
-                f.write("# RMS  Ligand\n")
+                write_header(f, f"RMS values for all ligands relative to {comp_lig_name}.", columns=["RMS", "Ligand"])
                 for rms, lig_name in rms_list:
                     f.write(f"{rms:.4f} {lig_name}\n")
 
@@ -570,11 +571,12 @@ class ScoreManager:
                     f.writelines(lines)
                 # Write sorted with header
                 with open(sorted_file, "w") as f:
-                    f.write("# Score  Ligand\n")
-                    f.writelines(sorted_scores)
+                    write_header(f, "Docking scores for all ligands against this protein.", columns=["Score", "Ligand"])
+                    for line in sorted_scores:
+                        f.write(line)
                 # Also update top_dockers_file with header
                 with open(top_dockers_file, "w") as f:
-                    f.write("# Score  Ligand\n")
+                    write_header(f, "Docking scores for all ligands against this protein.", columns=["Score", "Ligand"])
                     f.writelines(sorted_scores)
                 self.write_stats(scores_file)
                 self.write_scores_csv(scores_file)
@@ -655,10 +657,35 @@ class LigandManager:
         return name.split(".")[0].replace(" ", "_")
 
 class ProteinManager:
-    def __init__(self, protein_dir):
+    def __init__(self, protein_dir, config_dir):
         self.protein_dir = protein_dir
+        self.config_dir = config_dir
+
+    def get_box_from_config(self, protein_name):
+        config_path = self.config_dir / f"config_{protein_name}.txt"
+        if config_path.exists():
+            params = {}
+            with open(config_path) as f:
+                for line in f:
+                    if "=" in line:
+                        k, v = line.strip().split("=", 1)
+                        params[k.strip()] = float(v.strip())
+            return (
+                params.get("center_x"),
+                params.get("center_y"),
+                params.get("center_z"),
+                params.get("size_x"),
+                params.get("size_y"),
+                params.get("size_z"),
+            )
+        return None
 
     def calculate_docking_box(self, protein_file):
+        protein_name = Path(protein_file).stem
+        box = self.get_box_from_config(protein_name)
+        if box and all(v is not None for v in box):
+            return box
+        # fallback to automatic calculation
         center_x, center_y, center_z = 0, 0, 0
         count = 0
         with open(protein_file) as f:
@@ -737,7 +764,7 @@ class DockingTask:
         log_file = self.results_dir / f"temp/{ligand_name}_model{self.model_index}_vs_{protein_name}.log"
 
         (self.results_dir / "temp").mkdir(parents=True, exist_ok=True)
-        protein_manager = ProteinManager(PROTEIN_DIR)
+        protein_manager = ProteinManager(PROTEIN_DIR, CONFIG_DIR)
         center_x, center_y, center_z, size_x, size_y, size_z = protein_manager.calculate_docking_box(self.protein_file)
 
         if self.debug:
@@ -1042,6 +1069,7 @@ class DisplayManager:
         global IS_RENDERING
         while IS_RENDERING:
             time.sleep(0.01)
+
 class CacheManager:
     def __init__(self, cache_dir, results_dir, ligand_dir, protein_dir, comparison_ligand_dir):
         self.cache_dir = cache_dir
@@ -1107,7 +1135,15 @@ class CacheManager:
             with open(progress_cache, "w") as f:
                 f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
 
-                
+def write_header(f, description, columns=None):
+    f.write(f"# Generated: {time.ctime()}\n")
+    f.write(f"# {description}\n")
+    if columns:
+        if f.name.endswith('.csv'):
+            f.write("# " + ",".join(columns) + "\n")
+        else:
+            f.write("# " + "  ".join(columns) + "\n")
+
 # Register the termination signal handler
 progress_manager = ProgressManager(PROGRESS_CACHE, ScoreManager(RESULTS_DIR))
 signal.signal(signal.SIGINT, progress_manager.terminate_script)
@@ -1152,6 +1188,47 @@ if __name__ == "__main__":
     total_proteins = len(proteins)
     total_comparison_ligands = len(comparison_ligands)
 
+    # After loading proteins
+    missing_configs = []
+    unfilled_configs = []
+
+    for protein_file in proteins:
+        protein_name = Path(protein_file).stem
+        config_path = CONFIG_DIR / f"config_{protein_name}.txt"
+        if not config_path.exists():
+            with open(config_path, "w") as f:
+                f.write(
+                    "center_x=\n"
+                    "center_y=\n"
+                    "center_z=\n"
+                    "size_x=\n"
+                    "size_y=\n"
+                    "size_z=\n"
+                    "# Fill in the bounding box values above for this protein.\n"
+                )
+            missing_configs.append(str(config_path))
+        else:
+            # Check if all required fields are filled
+            with open(config_path) as f:
+                content = f.read()
+                for key in ["center_x=", "center_y=", "center_z=", "size_x=", "size_y=", "size_z="]:
+                    if f"{key}\n" in content or f"{key}\r\n" in content:  # still blank
+                        unfilled_configs.append(str(config_path))
+                        break
+
+    if missing_configs:
+        print("The following protein config files were created and must be filled in before running the program again:")
+        for path in missing_configs:
+            print("  ", path)
+        exit(1)
+
+    if unfilled_configs:
+        print("The following protein config files are missing required bounding box values:")
+        for path in unfilled_configs:
+            print("  ", path)
+        print("Please fill in all center_x, center_y, center_z, size_x, size_y, and size_z values before running the program again.")
+        exit(1)
+
     # Create a dedicated subfolder for output files
     (RESULTS_DIR / "temp").mkdir(parents=True, exist_ok=True)
 
@@ -1160,12 +1237,12 @@ if __name__ == "__main__":
         ligand_manager.extract_models(ligand_file)
 
     # Now count models for all ligands
-    all_models = []
+    all_ligands_models = []
     for ligand_file in ligands:
         models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
-        all_models.append(len(models))
+        all_ligands_models.append(models)
 
-    total_tasks = sum(n_models * total_proteins for n_models in all_models)
+    total_tasks = sum(len(models_for_ligand) * total_proteins for models_for_ligand in all_ligands_models)
 
     if total_tasks == 0:
         print("No docking tasks to perform. Check your ligand/model extraction.")
@@ -1350,6 +1427,34 @@ if __name__ == "__main__":
             print(f"Top 5 ligands as substitutes for {comp_lig_name}:")
             for line in sorted_lines[:5]:
                 print(line.strip())
+
+    # Create a summary ranking ligands by their best (lowest) docking score across all proteins
+    summary_file = RESULTS_DIR / "scores" / "best_ligands_overall.txt"
+    ligand_best_scores = {}
+
+    for protein_file in proteins:
+        protein_name = Path(protein_file).stem
+        scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
+        if scores_file.exists():
+            with open(scores_file) as f:
+                for line in f:
+                    if line.startswith("#"): continue
+                    score, ligand = line.strip().split()
+                    score = float(score)
+                    if ligand not in ligand_best_scores or score < ligand_best_scores[ligand]:
+                        ligand_best_scores[ligand] = score
+
+    # Sort ligands by their best score (lowest is best)
+    sorted_ligands = sorted(ligand_best_scores.items(), key=lambda x: x[1])
+    with open(summary_file, "w") as f:
+        write_header(f, "Best ligands overall (by best docking score across all proteins).", columns=["BestScore", "Ligand"])
+        for ligand, score in sorted_ligands:
+            f.write(f"{score:.4f} {ligand}\n")
+
+    print(f"Best ligands overall (by best docking score across all proteins) saved to {summary_file}.")
+    print("Top 5 ligands overall:")
+    for ligand, score in sorted_ligands[:5]:
+        print(f"{score:.4f} {ligand}")
 
 print("End of program")
 
