@@ -182,8 +182,26 @@ class DockingProgressMonitor:
 
 class DockingConfig:
     def __init__(self, config_path):
-        self.config = self.read_config(config_path)
+        self.config_path = Path(config_path) # Store the path
+        if not self.config_path.exists():
+            print(f"Config file not found. Creating a default template at: {self.config_path}")
+            self.create_default_config_file()
+        
+        self.config = self.read_config(self.config_path)
         self.validate_and_report()
+
+    def create_default_config_file(self):
+        """Creates the default config file with placeholders."""
+        with open(self.config_path, "w") as f:
+            f.write("# AutoDock Vina settings\n")
+            f.write("# Number of CPUs to use (e.g., 8)\n")
+            f.write("cpu = \n")
+            f.write("\n# Exhaustiveness of the search (e.g., 8, 16, 32). Higher is more thorough but slower.\n")
+            f.write("exhaustiveness = \n")
+            f.write("\n# Energy range for returned binding modes (e.g., 3)\n")
+            f.write("energy_range = \n")
+            f.write("\n# Number of binding modes to generate (e.g., 9)\n")
+            f.write("num_modes = \n")
 
     def read_config(self, config_path):
         config = {}
@@ -201,13 +219,28 @@ class DockingConfig:
         return config
 
     def validate_and_report(self):
+        """Checks for missing values and stops the program if any are found."""
         expected_keys = ["cpu", "exhaustiveness", "energy_range", "num_modes"]
-        print("Configuration loaded:")
+        missing_keys = []
+
+        # First, build a list of all keys that are missing or have no value
         for key in expected_keys:
-            if key in self.config:
-                print(f"  {key}: {self.config[key]}")
-            else:
-                print(f"  WARNING: {key} not set in config file!")
+            if key not in self.config or not self.config[key].strip():
+                missing_keys.append(key)
+
+        # If the list is not empty, print an error and exit the program
+        if missing_keys:
+            print(f"\nERROR: The main config file '{self.config_path.name}' is missing required values.")
+            print("Please fill in the following settings before running again:")
+            for key in missing_keys:
+                print(f"  - {key}")
+            print("") # Add a blank line for spacing
+            exit(1) # Terminate the script
+
+        # If all keys are present and have values, print the confirmation
+        print("Vina configuration loaded successfully:")
+        for key in expected_keys:
+            print(f"  {key}: {self.config[key]}")
 
 class ScoreManager:
     def __init__(self, results_dir):
@@ -373,7 +406,7 @@ class ScoreManager:
                     f.write(f"# Generated: {time.ctime()}\n")
                     f.write("# ScoreDiff  Ligand\n")
                     for _, diff, lig_name in diffs:
-                        f.write(f"{diff:.4f} {lig_name}\n")
+                        f.write(f"{diff:+.4f} {lig_name}\n")
 
     def write_ligand_rms_to_comparison(self, ligands, proteins, comparison_ligands):
         # Write per-ligand RMS to comparison ligands
@@ -458,9 +491,11 @@ class ScoreManager:
             print(f"Best ligands ranked and saved to {ranked_best_ligands_file}.")
 
             # Display the top 5 ligands
-            print("Top 5 ligands:")
-            for line in sorted_ligands[:5]:
-                print(line.strip())  # This will now show model names, e.g., "0.27196004 AAEAMN_model01"
+            print("\n--- Top 5 Ligands (Overall Best Score) ---")
+            for i, line in enumerate(sorted_ligands[:5]):
+                # The f-string adds the "#1: ", "#2: ", etc. formatting
+                print(f"  #{i+1}: {line.strip()}")  # This will now show model names, e.g., "0.27196004 AAEAMN_model01"
+                # This will now show model names, e.g., "0.27196004 AAEAMN_model01"
         else:
             print("No best ligands file found. Skipping ranking.")
 
@@ -495,7 +530,7 @@ class ScoreManager:
                 with open(per_protein_file, "w") as f:
                     f.write("# ScoreDiff  Ligand\n")
                     for _, diff, lig_name in diffs:
-                        f.write(f"{diff:.4f} {lig_name}\n")
+                        f.write(f"{diff:+.4f} {lig_name}\n")
                 for _, diff, lig_name in diffs:
                     rms_scores.append((lig_name, diff))
             ligand_rms = {}
@@ -539,10 +574,12 @@ class ScoreManager:
                 rms_value = None
                 if rms_file.exists():
                     with open(rms_file) as rf:
-                        rms_lines = [line.strip() for line in rf if line.strip()]
+                        # The strip() will handle empty lines. Now we just need to ignore comments.
+                        rms_lines = [line.strip() for line in rf if line.strip() and not line.strip().startswith("#")] 
                         for idx, line in enumerate(rms_lines):
+                            # This part of the code should now only see valid data lines
                             if ligand_name in line:
-                                rms_value = float(line.split()[0])
+                                rms_value = float(line.split()[0]) 
                                 rms_rank = idx + 1
                                 break
                 f.write(f"{comp_lig_name}:\n")
@@ -1185,6 +1222,12 @@ if __name__ == "__main__":
         cache_manager.initialize_cache("clear-everything")
     else:
         cache_manager.initialize_cache()
+    
+    # Load the main Vina configuration from the file
+    print("Loading Vina settings from config.txt...")
+    main_config = DockingConfig(CONFIG_PATH)
+    vina_settings = main_config.config
+    # -------------------
 
     # Read progress from cache
     progress = progress_manager.read_progress()
@@ -1295,7 +1338,7 @@ if __name__ == "__main__":
             )
 
             # Perform docking
-            docking_task = DockingTask(comparison_ligand_file, protein_file, 0, {}, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
+            docking_task = DockingTask(comparison_ligand_file, protein_file, 0, vina_settings, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
             docking_task.run()
 
             # Update progress after each docking task
@@ -1354,7 +1397,7 @@ if __name__ == "__main__":
                 )
 
                 # Perform docking
-                docking_task = DockingTask(model_file, protein_file, MODEL_INDEX, {}, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
+                docking_task = DockingTask(model_file, protein_file, MODEL_INDEX, vina_settings, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
                 docking_task.run()
 
                 end_time = time.time()
@@ -1374,6 +1417,10 @@ if __name__ == "__main__":
         LIGAND_INDEX += 1
         progress_manager.update_from_globals()
 
+    # Clear the entire terminal screen to remove the progress bars
+    print("\033[H\033[J", end="") 
+    print("Docking process complete. Generating final summaries...\n")
+    
     # Move temporary files to the results directory
     result_organizer = ResultOrganizer(RESULTS_DIR)
     result_organizer.move_temp_files()
@@ -1439,9 +1486,9 @@ if __name__ == "__main__":
             with open(ranked_file, "w") as f:
                 f.writelines(sorted_lines)
             print(f"Top ligands as substitutes for {comp_lig_name} saved to {ranked_file}.")
-            print(f"Top 5 ligands as substitutes for {comp_lig_name}:")
-            for line in sorted_lines[:5]:
-                print(line.strip())
+            print(f"\n--- Top 5 Substitutes for: {comp_lig_name} (by RMS) ---")
+            for i, line in enumerate(sorted_lines[:5]):
+                print(f"  #{i+1}: {line.strip()}")
 
     # Create a summary ranking ligands by their best (lowest) docking score across all proteins
     summary_file = RESULTS_DIR / "scores" / "best_ligands_overall.txt"
@@ -1470,6 +1517,30 @@ if __name__ == "__main__":
     print("Top 5 ligands overall:")
     for ligand, score in sorted_ligands[:5]:
         print(f"{score:.4f} {ligand}")
+
+    print("\n\n--- Top 5 Docking Ligands Per Protein ---")
+    for protein_file in proteins:
+        protein_name = Path(protein_file).stem
+        # This reads the final sorted file that your script already creates
+        top_dockers_file = RESULTS_DIR / "scores" / f"top_dockers_{protein_name}.txt"
+        
+        print(f"\n--- For Protein: {protein_name} ---")
+        if top_dockers_file.exists():
+            try:
+                with open(top_dockers_file, "r") as f:
+                    # Read all lines, skipping any comment headers
+                    lines = [line.strip() for line in f if not line.strip().startswith("#")]
+                    if not lines:
+                        print("  No scores found in the results file.")
+                    else:
+                        # Print the top 5 ligands from the sorted file
+                        for i, line in enumerate(lines[:5]):
+                            print(f"  #{i+1}: {line}")
+            except Exception as e:
+                print(f"  Could not read scores file: {e}")
+        else:
+            print(f"  Scores file not found: {top_dockers_file}")
+    print("-----------------------------------------")
 
 print("End of program")
 
