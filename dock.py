@@ -124,7 +124,7 @@ class ConfigManager:
 
         if not progress_cache.exists():
             with open(progress_cache, "w") as f:
-                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\n")
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\nTOTAL_TASK_TIME=0.0\n")
 
 
 class RMSCalculator:
@@ -779,12 +779,19 @@ class ProgressManager:
             progress = {}
             with open(self.cache_file) as f:
                 for line in f:
-                    key, value = line.strip().split("=")
-                    progress[key] = int(value)
+                    if "=" in line:
+                        key, value = line.strip().split("=", 1)
+                        try:
+                            # First, try to convert the value to an integer
+                            progress[key] = int(value)
+                        except ValueError:
+                            # If that fails, it must be a decimal (float)
+                            progress[key] = float(value)
             return progress
         else:
-            print("Error: Progress cache file not found.")
-            exit(1)
+            # If the cache file doesn't exist, we must exit after it's created
+            # by the CacheManager, so we return an empty dictionary for now.
+            return {}
 
     def update_progress(self, progress):
         with open(self.cache_file, "w") as f:
@@ -799,7 +806,8 @@ class ProgressManager:
             "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
             "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
             "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0),
-            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0)
+            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0),
+            "TOTAL_TASK_TIME": globals().get("TOTAL_TASK_TIME", 0.0)
         }
         self.update_progress(progress)
         self.score_manager.write_failed_docking_summary(FAILED_DOCKINGS)
@@ -812,7 +820,8 @@ class ProgressManager:
             "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
             "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
             "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0),
-            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0)
+            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0),
+            "TOTAL_TASK_TIME": globals().get("TOTAL_TASK_TIME", 0.0)
         })
 
 class DockingTask:
@@ -972,19 +981,26 @@ class DisplayManager:
         console_width = shutil.get_terminal_size((80, 20)).columns
         progress_bar_length = console_width - 30
 
-        # Calculate elapsed time for the last 10 tasks
-        if TASK_DURATIONS:
-            avg_task_time = sum(TASK_DURATIONS) / len(TASK_DURATIONS)
-        else:
-            avg_task_time = 0
-
         remaining_tasks = total_tasks - current_task
-        remaining_time = avg_task_time * remaining_tasks if avg_task_time > 0 else 0
 
-        # Format remaining time as HH:MM:SS
-        hours, rem = divmod(int(remaining_time), 3600)
-        minutes, seconds = divmod(rem, 60)
-        etc = f"{hours:02}:{minutes:02}:{seconds:02}"
+        # --- ETC Calculation ---
+        # 1. Rolling Average ETC (Recent Tasks)
+        if TASK_DURATIONS:
+            rolling_avg_time = statistics.mean(TASK_DURATIONS)
+            rolling_etc_seconds = rolling_avg_time * remaining_tasks
+        else:
+            rolling_etc_seconds = 0
+        h, r = divmod(int(rolling_etc_seconds), 3600); m, s = divmod(r, 60)
+        rolling_etc_str = f"{h:02}:{m:02}:{s:02}"
+
+        # 2. Overall Average ETC
+        if current_task > 0:
+            overall_avg_time = TOTAL_TASK_TIME / current_task
+            overall_etc_seconds = overall_avg_time * remaining_tasks
+        else:
+            overall_etc_seconds = 0
+        h, r = divmod(int(overall_etc_seconds), 3600); m, s = divmod(r, 60)
+        overall_etc_str = f"{h:02}:{m:02}:{s:02}"
 
         print("\033[H\033[J", end="")  # Clear the terminal
         print("========================================")
@@ -1012,14 +1028,14 @@ class DisplayManager:
         print(f"Ligand name: {ligand_name}")
         print(f"Protein name: {protein_name}")
 
-        percent_through_dock = (current_task * 100) / total_tasks
+        percent_through_dock = (current_task * 100) / total_tasks if total_tasks > 0 else 0
         self.move_cursor(21, 0)
-        print(f"Total progress: {current_task}/{total_tasks}")
-        self.draw_progress_bar(22, 0, progress_bar_length, current_task, total_tasks, False)
+        print(f"Total Progress: {current_task}/{total_tasks} ({percent_through_dock:.3f}%)")
+        self.draw_progress_bar(19, 0, progress_bar_length, current_task, total_tasks, False)
 
         # Display estimated time to completion
         self.move_cursor(24, 0)
-        print(f"Estimated time to completion: {etc}")
+        print(f"ETC (Recent Avg): {rolling_etc_str}  |  ETC (Overall Avg): {overall_etc_str}")
 
         self.move_cursor(26, 0)
         print("Do CTRL+C to exit")
@@ -1275,7 +1291,7 @@ class CacheManager:
 
         if not progress_cache.exists():
             with open(progress_cache, "w") as f:
-                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\n")
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\nTOTAL_TASK_TIME=0.0\n")
 
 def write_header(f, description, columns=None):
     f.write(f"# Generated: {time.ctime()}\n")
@@ -1303,7 +1319,8 @@ ligand_manager = LigandManager(LIGAND_DIR, CACHE_DIR)
 # Main script execution
 if __name__ == "__main__":
     import sys
-    
+
+
     # Initialize ScoreManager
     config_manager = ConfigManager(CONFIG_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
     cache_manager = CacheManager(CACHE_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
@@ -1332,6 +1349,7 @@ if __name__ == "__main__":
     MODEL_INDEX = progress.get("MODEL_INDEX", 0)
     PROTEIN_INDEX = progress.get("PROTEIN_INDEX", 0)
     COMPLETED_TASKS = progress.get("COMPLETED_TASKS", 0)
+    TOTAL_TASK_TIME = float(progress.get("TOTAL_TASK_TIME", 0.0))
 
     # Load ligands, proteins, and comparison ligands
     ligands = [line.strip() for line in open(LIGAND_NAMES)]
@@ -1530,7 +1548,11 @@ if __name__ == "__main__":
 
                 # Record task duration
                 end_time = time.time()
-                TASK_DURATIONS.append(end_time - start_time)
+
+                task_duration = end_time - start_time
+                TASK_DURATIONS.append(task_duration) # For the rolling average
+                TOTAL_TASK_TIME += task_duration   # Add to our new overall total
+                
                 start_time = end_time
                 
                 # Update progress
