@@ -1,140 +1,140 @@
-# Protein-Ligand Docking Automation
+# Protein-Ligand Docking Automation Pipeline
 
-This project automates protein-ligand docking using [AutoDock Vina](https://github.com/ccsb-scripps/AutoDock-Vina), organizing results and generating comprehensive score and ranking files for analysis. Progress is saved after each docking operation, allowing seamless resumption after interruptions.
+A robust Python pipeline to automate high-throughput molecular docking using AutoDock Vina. This script manages file organization, executes docking runs, saves progress, and generates comprehensive analysis files to rank ligands based on their performance against a set of proteins and user-defined comparison ligands.
 
 ---
 
-## Features
+## Key Features
 
-- **Automated Docking:** Batch docking of multiple ligands to multiple proteins.
-- **Progress Persistence:** Resume from last successful step after interruptions.
-- **Dynamic Configuration:** Customize docking parameters via a config file.
-- **Comprehensive Logging:** Detailed logs for each docking operation.
-- **Structured Results:** Output files and folders organized for easy analysis.
+-   **High-Throughput Docking:** Automatically runs a matrix of docking jobs for multiple ligands against multiple proteins.
+-   **Persistent & Resumable Workflow:** Saves progress after every single docking operation. If the script is stopped (even with `Ctrl+C`), it can be restarted and will resume exactly where it left off.
+-   **Comparative Analysis Engine:** Goes beyond simple docking scores by calculating rankings based on score differences and Root Mean Square (RMS) values relative to known "comparison ligands."
+-   **Automated File Management:** Intelligently organizes all inputs, outputs, logs, and results into a clean and predictable folder structure. Handles multi-model ligands by splitting them into individual files.
+-   **Dynamic Configuration:** All Vina parameters (`cpu`, `exhaustiveness`, etc.) and protein-specific docking box coordinates are managed through simple text configuration files. The script will auto-generate templates for you.
+-   **Live Progress Monitoring:** Detailed, multi-bar progress display in the terminal shows overall progress, per-file progress, and an estimated time to completion (ETC).
 
 ---
 
 ## Prerequisites
 
-- **AutoDock Vina:** [Download and install](https://github.com/ccsb-scripps/AutoDock-Vina).
-- **Python 3.7+**
-- **Windows or Unix-like environment**
+-   **Python 3.7+**: The script is written in Python.
+-   **AutoDock Vina**: The core docking engine. Both `vina.exe` and `vina_split.exe` must be installed and accessible via your system's PATH.
+    -   [Download and Install AutoDock Vina](https://vina.scripps.edu/downloads/)
+    -   **Important:** Ensure the Vina installation directory is added to your system's `PATH` environment variable to avoid `FileNotFoundError`.
 
 ---
 
-## Setup
+## Installation & Setup
 
-1. **Clone the Repository:**
-   ```bash
-   git clone https://github.com/yourusername/protein-ligand-docking-automation.git
-   cd protein-ligand-docking-automation
-   ```
+1.  **Clone the Repository (or place the script):**
+    ```bash
+    git clone [https://github.com/yourusername/protein-ligand-docking-automation.git](https://github.com/yourusername/protein-ligand-docking-automation.git)
+    cd protein-ligand-docking-automation
+    ```
 
-2. **Prepare Input Files:**
-   - Place `.pdbqt` protein files in `dock/proteins/`
-   - Place `.pdbqt` ligand files in `dock/ligands/`
-   - Place `.pdbqt` comparison ligand files in `dock/comparison_ligands/`
+2.  **Prepare Input Files (Crucial Step):**
+    This script expects that your protein and ligand files are already in the correct **`.pdbqt`** format. AutoDock Vina requires files with proper partial charges (like Gasteiger charges) and specific atom types.
+    -   Use tools like **AutoDock Tools (ADT)** or **Open Babel** to convert your source files (e.g., `.pdb`) into properly prepared `.pdbqt` files before placing them in the folders below.
 
-3. **Configure Docking Parameters:**
-   - Edit `dock/config/config.txt` to set Vina parameters (see below).
+3.  **Set Up Folder Structure:**
+    The script operates within a main `dock/` directory. Place your prepared `.pdbqt` files into the appropriate subdirectories:
+    -   `dock/proteins/`
+    -   `dock/ligands/`
+    -   `dock/comparison_ligands/`
+
+4.  **Initial Run & Configuration:**
+    -   The **first time** you run the script, it will see that the configuration files are missing and will automatically create templates for you.
+    -   It will then stop and instruct you to fill them out.
+    -   **`dock/config/config.txt`**: Open this file and set your desired Vina parameters (cpu, exhaustiveness, etc.).
+    -   **`dock/config/config_<protein_name>.txt`**: For each protein, open its corresponding config file and paste in the `center_x/y/z` and `size_x/y/z` values for the docking box.
 
 ---
 
-## Folder Structure
+## Folder Structure Overview
 
 ```
 dock/
-  config/
-    config.txt           # Docking parameters
-  proteins/              # Protein .pdbqt files
-  ligands/               # Ligand .pdbqt files
-  comparison_ligands/    # Comparison ligand .pdbqt files
-  cache/                 # Internal cache files
-  results/
-    scores/
-      scores_<protein_name>.txt                # Scores for each protein
-      scores_<comparisonLigand_name>_RMS.txt   # RMS scores for each comparison ligand
-      scores_<comparisonLigand_name>/
-        scores_<comparisonLigand_name>_in_<protein_name>.txt
-      scores_proteins/
-        scores_<protein_name>/
-          scores_<protein_name>_unsorted.txt
-          scores_<protein_name>_sorted.txt
-    docked_ligands/
-      docked_<ligand_name>/
-        <ligand_name>_scores.txt
-        <ligand_name>_in_<protein_name>.log
-        <ligand_name>_in_<protein_name>.pdbqt
-      docked_<ligand_name>_modelXX/
-        ...
-  log/
-    docking_log.txt      # Log of all docking runs
+├── cache/
+│   ├── models_<ligand_name>/ # Sub-folder for split ligand models
+│   │   └── *.pdbqt
+│   ├── ligandNames.txt
+│   ├── proteinNames.txt
+│   └── progress_cache.txt
+│
+├── config/
+│   ├── config.txt                 # Main Vina parameters
+│   └── config_<protein_name>.txt  # Per-protein box coordinates
+│
+├── comparison_ligands/
+│   └── *.pdbqt                    # Your reference ligands
+│
+├── ligands/
+│   └── *.pdbqt                    # The ligands you want to test
+│
+├── log/
+│   └── docking_log.txt            # Master log of all script events
+│
+├── proteins/
+│   └── *.pdbqt                    # Your receptor proteins
+│
+└── results/
+    ├── docked_ligands/
+    │   └── docked_<ligand_name>/  # Sub-folder for each ligand's results
+    │       ├── <ligand>_in_<protein>.log
+    │       ├── <ligand>_in_<protein>.pdbqt
+    │       └── <ligand>_scores.txt
+    │
+    └── scores/
+        ├── scores_<protein_name>.txt          # Master sorted scores for a protein
+        ├── scores_<comparison>_RMS.txt      # Overall ranking vs. a comparison ligand
+        └── scores_<comparison>/             # Per-protein rankings vs. a comparison ligand
+            └── scores_<comp>_in_<prot>.txt
 ```
-
----
-
-## Configuration
-
-Edit `dock/config/config.txt` to set Vina parameters:
-
-- `cpu`: Number of CPU threads to use (e.g., 8)
-- `exhaustiveness`: Search exhaustiveness (higher = more accurate, slower)
-- `energy_range`: Energy range for output modes
-- `num_modes`: Number of binding modes to generate
-
-Example:
-```
-cpu=8
-exhaustiveness=16
-energy_range=4
-num_modes=9
-```
-
----
-
-## Output Files
-
-- **scores_<protein_name>.txt**: Scores for all ligands docked to a protein.
-- **scores_<comparisonLigand_name>_RMS.txt**: RMS of score differences for each ligand vs. a comparison ligand.
-- **scores_<comparisonLigand_name>/scores_<comparisonLigand_name>_in_<protein_name>.txt**: Score differences for each ligand vs. a comparison ligand for a specific protein.
-- **scores_proteins/scores_<protein_name>_unsorted.txt**: Unsorted scores for a protein.
-- **scores_proteins/scores_<protein_name>_sorted.txt**: Sorted scores for a protein.
-- **docked_ligands/docked_<ligand_name>/**: Contains all docking result files and a summary for each ligand.
-
----
-
-## Log Files
-
-- **log/docking_log.txt**: Chronological log of all docking runs, errors, and events.
-
----
-
-## Additional Data & Recommendations
-
-- **Docking parameters** for each run are stored in logs or as metadata.
-- **Timestamps** for each docking operation are logged.
-- **Failed docking attempts** are recorded in `docking_log.txt`.
-- **Summary statistics** (mean, median, stddev) for each ligand/protein/comparison ligand can be generated from scores.
-- **README** (this file) describes the structure and usage.
-- **Consider adding:**  
-  - Per-ligand/protein statistics files  
-  - A summary file listing all ligands, proteins, and comparison ligands used  
-  - A metadata file for each docking run with parameters and environment info
 
 ---
 
 ## Usage
 
-1. Place your protein, ligand, and comparison ligand `.pdbqt` files in their respective folders.
-2. Edit `config/config.txt` as needed.
-3. Run the script:
-   ```bash
-   python dock.py
-   ```
-4. Results will appear in the `results/` folder.
+Navigate to the script's directory in your terminal and run it using Python.
+
+#### Basic Run
+This will start or resume the docking process using the existing configuration.
+```bash
+python dock.py
+```
+
+#### Command-Line Arguments
+Control the script's behavior with optional flags:
+
+-   **`--clear-cache`**: (Safe Reset) Archives the contents of `dock/cache/` to a backup folder. This does not delete your results. Use this if you have updated your input ligand files.
+    ```bash
+    python dock.py --clear-cache
+    ```
+-   **`--clear-everything`**: (Destructive Reset) **Permanently deletes both the `dock/cache/` and `dock/results/` folders.** Use this with caution when starting a completely new project.
+    ```bash
+    python dock.py --clear-everything
+    ```
+-   **`--debug`**: Runs in debug mode, printing extra information about Vina commands and log file contents.
+    ```bash
+    python dock.py --debug
+    ```
+
+---
+
+## Troubleshooting
+
+-   **Error: `FileNotFoundError: [WinError 2] The system cannot find the file specified` (referring to `vina` or `vina_split`)**
+    -   **Cause:** The folder where you installed AutoDock Vina is not in your system's PATH.
+    -   **Solution:** Find your Vina installation directory (e.g., `C:\Program Files (x86)\The Scripps Research Institute\Vina`) and add this full path to your Windows/Linux/macOS `Path` environment variable. You must restart your terminal after making this change.
+
+-   **Error: `Parse error on line X in file ...`**
+    -   **Cause:** One of your input `.pdbqt` files (either a ligand or a protein) is corrupted or was not prepared correctly.
+    -   **Solution:** Delete the faulty `.pdbqt` file and re-create it using a reliable tool like Open Babel or AutoDock Tools, ensuring proper charges and atom types are assigned.
 
 ---
 
 ## Contact
 
-For questions or issues, contact [iwbmo05@gmail.com](mailto:iwbmo05@gmail.com) or iwbmo on Discord.
+For questions or issues, feel free to reach out.
+-   **Email:** [iwbmo05@gmail.com](mailto:iwbmo05@gmail.com)
+-   **Discord:** iwbmo
