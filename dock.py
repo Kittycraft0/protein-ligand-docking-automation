@@ -1366,11 +1366,19 @@ if __name__ == "__main__":
             model_name = Path(model_file).stem
         total_models = len(models)
 
-        current_task = (
-            LIGAND_INDEX * total_models * total_proteins +
-            MODEL_INDEX * total_proteins +
-            PROTEIN_INDEX + 1
-        )
+        # This is the NEW, correct calculation.
+        # It uses the persistent indices to be accurate even after a restart.
+        
+        # 1. Start with the tasks from all fully completed ligands
+        completed_tasks = 0
+        for i in range(LIGAND_INDEX):
+            completed_tasks += len(all_ligands_models[i]) * total_proteins
+        
+        # 2. Add tasks from all fully completed models within the CURRENT ligand
+        completed_tasks += MODEL_INDEX * total_proteins
+        
+        # 3. Add tasks from all completed proteins within the CURRENT model
+        completed_tasks += PROTEIN_INDEX
 
         while MODEL_INDEX < total_models:
             model_file = models[MODEL_INDEX]
@@ -1384,7 +1392,7 @@ if __name__ == "__main__":
 
                 # Display progress before starting docking
                 display_manager.display_progress(
-                    current_task=current_task,
+                    current_task=completed_tasks,
                     total_tasks=total_tasks,
                     ligand_index=LIGAND_INDEX,
                     total_ligands=total_ligands,
