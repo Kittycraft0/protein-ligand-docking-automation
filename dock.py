@@ -124,7 +124,7 @@ class ConfigManager:
 
         if not progress_cache.exists():
             with open(progress_cache, "w") as f:
-                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\n")
 
 
 class RMSCalculator:
@@ -672,37 +672,51 @@ class LigandManager:
         self.ligand_dir = ligand_dir
         self.cache_dir = cache_dir
 
-    def extract_models(self, ligand_file):
+    def extract_models(self, ligand_file, display_callback=None, display_args=None):
+        """
+        Extracts models from a ligand file. Now accepts a callback function
+        to report progress.
+        """
         ligand_name = Path(ligand_file).stem
         output_dir = self.cache_dir / f"models_{ligand_name}"
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check if models are already extracted
         if list(output_dir.glob("*.pdbqt")):
+            # If a callback is provided, show a quick 100% update
+            if display_callback and display_args:
+                display_callback(**display_args, current_file_progress=1.0)
             print(f"Models for {ligand_name} already extracted.")
             return
+
         with open(ligand_file) as f:
-            if "MODEL" in f.read():
+            content = f.read()
+            if "MODEL" in content:
+                # This is where the work happens that takes time
+                # We can't easily monitor subprocess.run, so we'll update before and after
+                if display_callback and display_args:
+                    display_callback(**display_args, current_file_progress=0.1) # Show 10%
+
                 result = subprocess.run(
                     ["vina_split", "--input", ligand_file, "--ligand", str(output_dir / f"{ligand_name}_model")],
-                    capture_output=True,
-                    text=True
+                    capture_output=True, text=True, check=True
                 )
-                if result.returncode != 0:
-                    print(f"Error: Failed to split ligand file {ligand_file}")
-                    exit(1)
-                if not list(output_dir.glob(f"{ligand_name}_model*.pdbqt")):
-                    print(f"Error: No models generated for ligand file {ligand_file}")
-                    exit(1)
+                
+                if display_callback and display_args:
+                     display_callback(**display_args, current_file_progress=0.8) # Show 80%
+                
+                # ... (rest of the renaming logic is the same) ...
                 for model_file in output_dir.glob(f"{ligand_name}_model*.pdbqt"):
                     stem_parts = model_file.stem.split("_model")
-                    if len(stem_parts) == 2 and stem_parts[1].isdigit():
-                        model_index = stem_parts[1]
-                    else:
-                        model_index = model_file.stem.split("_")[-1]
+                    model_index = stem_parts[1] if len(stem_parts) == 2 and stem_parts[1].isdigit() else model_file.stem.split("_")[-1]
                     new_name = f"{ligand_name}_model_{model_index}.pdbqt"
                     model_file.rename(output_dir / new_name)
             else:
-                # Use base name for single-model ligands
                 shutil.copy(ligand_file, output_dir / f"{ligand_name}.pdbqt")
+
+        # Report 100% completion for the current file
+        if display_callback and display_args:
+            display_callback(**display_args, current_file_progress=1.0)
 
     @staticmethod
     def clean_ligand_name(name):
@@ -784,7 +798,8 @@ class ProgressManager:
             "COMPARISON_PROTEIN_INDEX": globals().get("COMPARISON_PROTEIN_INDEX", 0),
             "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
             "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
-            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0)
+            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0),
+            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0)
         }
         self.update_progress(progress)
         self.score_manager.write_failed_docking_summary(FAILED_DOCKINGS)
@@ -796,7 +811,8 @@ class ProgressManager:
             "COMPARISON_PROTEIN_INDEX": globals().get("COMPARISON_PROTEIN_INDEX", 0),
             "LIGAND_INDEX": globals().get("LIGAND_INDEX", 0),
             "MODEL_INDEX": globals().get("MODEL_INDEX", 0),
-            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0)
+            "PROTEIN_INDEX": globals().get("PROTEIN_INDEX", 0),
+            "COMPLETED_TASKS": globals().get("COMPLETED_TASKS", 0)
         })
 
 class DockingTask:
@@ -1115,6 +1131,80 @@ class DisplayManager:
         console_height = shutil.get_terminal_size((80, 20)).lines
         for _ in range(console_height):
             print()
+    
+    def display_simple_progress(self, title, current_item, total_items, item_name):
+        """Displays a simple, single-line progress bar for a task."""
+        console_width = shutil.get_terminal_size((80, 20)).columns
+        
+        # Clear the screen to show this new progress display
+        print("\033[H\033[J", end="")
+        
+        # Print a title for the current stage
+        print("========================================")
+        print(f"  {title}")
+        print("========================================\n")
+
+        # Display the progress information
+        progress_percent = (current_item / total_items) * 100
+        print(f"Processing item {current_item} of {total_items} ({progress_percent:.1f}%)...")
+        print(f"Current File: {item_name}")
+
+        # Draw the progress bar
+        progress_bar_length = console_width - 10
+        filled = int(progress_bar_length * current_item // total_items)
+        bar = "[" + "\033[42m \033[0m" * filled + " " * (progress_bar_length - filled) + "]"
+        print(f"\n{bar}")
+
+    def display_extraction_progress(self, title, processed_size, total_size, item_name, start_time,
+                                    current_file_size=0, current_file_progress=0.0):
+        """Displays progress and ETC for both the total job and the current file."""
+        console_width = shutil.get_terminal_size((80, 20)).columns
+        
+        # --- Overall Time Calculation (No changes here) ---
+        total_elapsed_time = time.time() - start_time
+        overall_speed = processed_size / total_elapsed_time if total_elapsed_time > 0 else 0
+        overall_remaining_size = total_size - processed_size
+        overall_etc_seconds = overall_remaining_size / overall_speed if overall_speed > 0 else 0
+        h, rem = divmod(int(overall_etc_seconds), 3600); m, s = divmod(rem, 60)
+        overall_etc_str = f"{h:02}:{m:02}:{s:02}"
+        speed_str = f"{overall_speed / (1024*1024):.2f} MB/s"
+
+        # --- NEW: Current File Time Estimate Calculation ---
+        # Estimate the total time this specific file should take based on the overall average speed
+        if overall_speed > 0:
+            file_total_time_estimate_seconds = current_file_size / overall_speed
+        else:
+            file_total_time_estimate_seconds = 0 # Can't estimate yet on the very first file
+        
+        m, s = divmod(int(file_total_time_estimate_seconds), 60)
+        file_total_time_str = f"{m:02}:{s:02}"
+        
+        # --- Display ---
+        print("\033[H\033[J", end="") # Clear screen
+        print("========================================")
+        print(f"  {title}")
+        print("========================================\n")
+
+        # Overall Progress Display
+        overall_progress_percent = (processed_size / total_size) * 100 if total_size > 0 else 0
+        processed_mb = processed_size / (1024*1024)
+        total_mb = total_size / (1024*1024)
+        print(f"Overall Progress: {processed_mb:.1f} / {total_mb:.1f} MB ({overall_progress_percent:.1f}%) | ETC: {overall_etc_str} | Speed: {speed_str}")
+        
+        progress_bar_length = console_width - 10
+        overall_filled = int(progress_bar_length * processed_size // total_size) if total_size > 0 else 0
+        bar = "[" + "\033[42m \033[0m" * overall_filled + " " * (progress_bar_length - overall_filled) + "]"
+        print(f"{bar}\n")
+
+        # --- UPDATED: Current File Progress Display ---
+        # This line now includes the new time estimate string
+        current_file_mb = current_file_size / (1024*1024)
+        print(f"--> Current File: {item_name} ({current_file_mb:.2f} MB) | Est. Time for File: ~{file_total_time_str}")
+
+        file_progress_percent = current_file_progress * 100
+        file_filled = int(progress_bar_length * current_file_progress)
+        file_bar = "[" + "\033[44m \033[0m" * file_filled + " " * (progress_bar_length - file_filled) + "]" # Blue bar
+        print(f"{file_bar} {file_progress_percent:.0f}%")
 
     @staticmethod
     def wait_for_render_stop():
@@ -1185,7 +1275,7 @@ class CacheManager:
 
         if not progress_cache.exists():
             with open(progress_cache, "w") as f:
-                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\n")
+                f.write("COMPARISON_LIGAND_INDEX=0\nCOMPARISON_PROTEIN_INDEX=0\nLIGAND_INDEX=0\nMODEL_INDEX=0\nPROTEIN_INDEX=0\nCOMPLETED_TASKS=0\n")
 
 def write_header(f, description, columns=None):
     f.write(f"# Generated: {time.ctime()}\n")
@@ -1213,9 +1303,14 @@ ligand_manager = LigandManager(LIGAND_DIR, CACHE_DIR)
 # Main script execution
 if __name__ == "__main__":
     import sys
+    
+    # Initialize ScoreManager
+    config_manager = ConfigManager(CONFIG_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
+    cache_manager = CacheManager(CACHE_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
+    score_manager = ScoreManager(RESULTS_DIR)
 
     # Handle command-line arguments for clearing cache
-    cache_manager = CacheManager(CACHE_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
+    #cache_manager = CacheManager(CACHE_DIR, RESULTS_DIR, LIGAND_DIR, PROTEIN_DIR, COMPARISON_LIGAND_DIR)
     if "--clear-cache" in sys.argv:
         cache_manager.initialize_cache("clear")
     elif "--clear-everything" in sys.argv:
@@ -1236,6 +1331,7 @@ if __name__ == "__main__":
     LIGAND_INDEX = progress.get("LIGAND_INDEX", 0)
     MODEL_INDEX = progress.get("MODEL_INDEX", 0)
     PROTEIN_INDEX = progress.get("PROTEIN_INDEX", 0)
+    COMPLETED_TASKS = progress.get("COMPLETED_TASKS", 0)
 
     # Load ligands, proteins, and comparison ligands
     ligands = [line.strip() for line in open(LIGAND_NAMES)]
@@ -1291,8 +1387,49 @@ if __name__ == "__main__":
     (RESULTS_DIR / "temp").mkdir(parents=True, exist_ok=True)
 
     # Extract models for all ligands first
+    # Extract models for all ligands first
+    # Extract models for all ligands first
+    print("Calculating total size of ligands for model extraction...")
+    total_ligand_size = sum(Path(f).stat().st_size for f in ligands) if ligands else 0
+    processed_size = 0
+    extraction_start_time = time.time()
+
     for ligand_file in ligands:
-        ligand_manager.extract_models(ligand_file)
+        current_file_path = Path(ligand_file)
+        current_file_size = current_file_path.stat().st_size
+
+        # We create a dictionary of arguments to pass to the display function
+        display_args = {
+            "title": "Step 1: Preparing Ligand Models",
+            "processed_size": processed_size,
+            "total_size": total_ligand_size,
+            "item_name": current_file_path.name,
+            "start_time": extraction_start_time,
+            "current_file_size": current_file_size,
+        }
+
+        # The extract_models function will now call the display function internally
+        # using the 'display_callback' argument we added to it.
+        ligand_manager.extract_models(
+            ligand_file,
+            display_callback=display_manager.display_extraction_progress,
+            display_args=display_args
+        )
+        
+        # Update the total size we have processed so far
+        processed_size += current_file_size
+    
+    # Final 100% display after the loop is done
+    display_manager.display_extraction_progress(
+        title="Step 1: Preparing Ligand Models",
+        processed_size=total_ligand_size,
+        total_size=total_ligand_size,
+        item_name="All models prepared.",
+        start_time=extraction_start_time,
+        current_file_size=0,
+        current_file_progress=1.0 # Show 100% for the "current file" bar
+    )
+    #time.sleep(1) # Pause for a moment to show completion
 
     # Now count models for all ligands
     all_ligands_models = []
@@ -1360,25 +1497,8 @@ if __name__ == "__main__":
     # Perform docking for ligands
     while LIGAND_INDEX < total_ligands:
         ligand_file = ligands[LIGAND_INDEX]
-        ligand_manager.extract_models(ligand_file)  # <-- FIXED
-        models = list((CACHE_DIR / f"models_{Path(ligand_file).stem}").glob("*.pdbqt"))
-        for model_file in models:
-            model_name = Path(model_file).stem
+        models = all_ligands_models[LIGAND_INDEX] # Get models for the current ligand
         total_models = len(models)
-
-        # This is the NEW, correct calculation.
-        # It uses the persistent indices to be accurate even after a restart.
-        
-        # 1. Start with the tasks from all fully completed ligands
-        completed_tasks = 0
-        for i in range(LIGAND_INDEX):
-            completed_tasks += len(all_ligands_models[i]) * total_proteins
-        
-        # 2. Add tasks from all fully completed models within the CURRENT ligand
-        completed_tasks += MODEL_INDEX * total_proteins
-        
-        # 3. Add tasks from all completed proteins within the CURRENT model
-        completed_tasks += PROTEIN_INDEX
 
         while MODEL_INDEX < total_models:
             model_file = models[MODEL_INDEX]
@@ -1390,9 +1510,9 @@ if __name__ == "__main__":
                 ligand_name = Path(model_file).stem
                 protein_name = Path(protein_file).stem
 
-                # Display progress before starting docking
+                # Display progress using our simple, persistent counter
                 display_manager.display_progress(
-                    current_task=completed_tasks,
+                    current_task=COMPLETED_TASKS, # Use the counter here
                     total_tasks=total_tasks,
                     ligand_index=LIGAND_INDEX,
                     total_ligands=total_ligands,
@@ -1405,16 +1525,17 @@ if __name__ == "__main__":
                 )
 
                 # Perform docking
-                docking_task = DockingTask(model_file, protein_file, MODEL_INDEX, vina_settings, RESULTS_DIR, DEBUG, ScoreManager(RESULTS_DIR))
+                docking_task = DockingTask(model_file, protein_file, MODEL_INDEX, vina_settings, RESULTS_DIR, DEBUG, score_manager)
                 docking_task.run()
 
-                end_time = time.time()
                 # Record task duration
+                end_time = time.time()
                 TASK_DURATIONS.append(end_time - start_time)
                 start_time = end_time
+                
                 # Update progress
-                current_task += 1
                 PROTEIN_INDEX += 1
+                COMPLETED_TASKS += 1 # Increment the persistent counter
                 progress_manager.update_from_globals()
 
             PROTEIN_INDEX = 0
@@ -1433,8 +1554,6 @@ if __name__ == "__main__":
     result_organizer = ResultOrganizer(RESULTS_DIR)
     result_organizer.move_temp_files()
 
-    # Initialize ScoreManager
-    score_manager = ScoreManager(RESULTS_DIR)
 
     # Calculate and save top dockers for each protein
     score_manager.calculate_top_dockers(proteins)
