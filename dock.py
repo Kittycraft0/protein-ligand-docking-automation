@@ -47,12 +47,27 @@ TASK_DURATIONS = deque(maxlen=30)  # Store durations for the last 30 tasks
 FAILED_DOCKINGS = []
 
 CONFIG_PATH = CONFIG_DIR / "config.txt"
-if not CONFIG_PATH.exists():
-    with open(CONFIG_PATH, "w") as f:
+class ConfigManager:
+    def __init__(self, config_dir, results_dir, ligand_dir, protein_dir, comparison_ligand_dir):
+        self.config_path = config_dir / "config.txt"
         self.results_dir = results_dir
         self.ligand_dir = ligand_dir
         self.protein_dir = protein_dir
         self.comparison_ligand_dir = comparison_ligand_dir
+        self.create_default_config()
+
+    def create_default_config(self):
+        """Creates a default config file if one doesn't exist."""
+        if not self.config_path.exists():
+            print(f"Config file not found. Creating default at: {self.config_path}")
+            with open(self.config_path, "w") as f:
+                f.write("# AutoDock Vina settings\n")
+                f.write("cpu = 8\n")
+                f.write("exhaustiveness = 8\n")
+                f.write("\n# Set higher for more flexible ligands\n")
+                f.write("energy_range = 3\n")
+                f.write("\n# Number of binding modes to generate\n")
+                f.write("num_modes = 9\n")
 
     def initialize_cache(self, mode=None):
         if mode == "clear":
