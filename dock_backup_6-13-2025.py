@@ -1524,35 +1524,6 @@ if __name__ == "__main__":
             while PROTEIN_INDEX < total_proteins:
                 protein_file = proteins[PROTEIN_INDEX]
 
-                # --- START: Insert This New Block ---
-                # 6/13/2025
-                
-                # Intelligently parse the filename to get the base model name
-                # This handles complex names from previous runs.
-                input_filename_stem = Path(model_file).stem
-                ligand_name_for_check = input_filename_stem.split('_vs_')[0]
-
-                # Check if this task's result already exists in the scores file
-                scores_file = RESULTS_DIR / "scores" / f"scores_{protein_name}.txt"
-                task_already_done = False
-                if scores_file.exists():
-                    with open(scores_file, "r") as f:
-                        # We add a space before the name to ensure we match a whole word
-                        if any(f" {ligand_name_for_check} " in line for line in f):
-                            task_already_done = True
-                
-                # If the task is done, skip it and update progress
-                if task_already_done:
-                    # You can comment out the print statement below if you don't want verbose output
-                    print(f"Skipping ({ligand_name_for_check} vs {protein_name}): Already in results.")
-                    
-                    PROTEIN_INDEX += 1
-                    COMPLETED_TASKS += 1
-                    progress_manager.update_from_globals()
-                    continue # This jumps to the next protein in the loop
-
-                # --- END: Insert This New Block ---
-
                 # Update ligand and protein names for progress display
                 ligand_name = Path(model_file).stem
                 protein_name = Path(protein_file).stem
