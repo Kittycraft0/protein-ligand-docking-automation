@@ -34,3 +34,6 @@ dock/log/
 dock/cache/
 9-25-2025_all_of_the_files
 dock/ligands/
+dock/cache/proteinNames.txt
+dock/cache/progress_cache.txt
+dock/cache/ligandNames.txt
