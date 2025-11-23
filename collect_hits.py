@@ -22,6 +22,11 @@ def create_file_index(source_dir: Path):
     
     end_time = time.time()
     print(f"Indexing complete. Found {len(file_index)} files in {end_time - start_time:.2f} seconds.\n")
+    
+    # 11/6/2025
+    print(f"First five files of file_index:")
+    print(list(file_index.items())[:5])
+    
     return file_index
 
 def collect_docking_hits(results_file: Path, source_results_dir: Path, output_dir: Path, file_index: dict, top_n: int = None, score_range: list = None):
@@ -109,14 +114,29 @@ def collect_docking_hits(results_file: Path, source_results_dir: Path, output_di
             except Exception as e:
                 print(f"\nERROR: Could not copy {source_file_path}. Reason: {e}")
         else:
+            print("Failed to find a molecule:")
+            print(f"Name: {model_name}")
+            print(f"File index: {file_index}")
+            print(f"Expected filename: {expected_filename}")
+            print(f"Source file path: {source_file_path}")
+            print(f"Output directory: {output_dir}")
+            print("Remember, you put in the WHOLE suffix, i.e. KCNH2_7CNOB_DOCK, not just what you want it to be. " \
+            "The program is looking for files with the name you type in, so make sure it matches.")
             failed_to_find.append(model_name)
+            break
             
     # --- 6. Final Report ---
     print(f"\n\nProcess complete. Successfully copied {copied_count} of {len(lines_to_process)} files to '{output_dir}'.")
     if failed_to_find:
         print(f"\nWARNING: Could not find result files for the following {len(failed_to_find)} models:")
+        # 11/6/2025 added iterator
+        iterator=0
         for name in failed_to_find:
             print(f"  - {name}")
+            iterator+=1
+            if iterator > 10:
+                print(f"  - and {len(failed_to_find)-10} others")
+                break
 
 def main():
     parser = argparse.ArgumentParser(
