@@ -1,1 +1,0 @@
-./dock/proteins/3k3k_DOCK.pdbqt
