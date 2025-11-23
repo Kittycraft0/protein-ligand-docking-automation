@@ -1,0 +1,8 @@
+# 6/26/2025
+center_x = 1.273
+center_y = 22.580
+center_z = 33.307
+size_x = 21.052
+size_y = 19.929
+size_z = 23.685
+# Fill in the bounding box values above for this protein.

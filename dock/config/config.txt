@@ -1,0 +1,11 @@
+# AutoDock Vina settings
+# number of cores your computer has times 2 i think
+cpu = 16
+# number of precision--8 is small but fast, 16 is moderate, 32 is extreme, a study showed you get no better results really by going above 40. if the binding area is larger make sure you use a larger exhaustiveness to compensate.
+exhaustiveness = 8
+
+# Set higher for more flexible ligands
+energy_range = 3
+
+# Number of binding modes to generate
+num_modes = 9
