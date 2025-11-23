@@ -1,0 +1,186 @@
+7/8/2025
+
+go here:
+https://zinc.docking.org/tranches/home/
+hope and pray that the webpage loads
+
+select
+Rep: 3D (wait)
+React: Clean
+
+select your tranches
+i did:
+LogP (up to): 1, 2, 2.5, 3
+Molecular Weight (up to, Daltons): 200, 250, 300, 325
+so 4*4=16 tranches
+got 178,955,270 Protomers. if each protomer takes 3 seconds then this would take me 17 years. i might be reading it wrong.
+
+further filtering:
+
+Purch: Wait OK (default)
+pH: Mid
+Charge: -1
+
+top 10 molecular weights last time:
+272.25 295.34 283.32 294.27 284.23 256.26 299.33 278.30 285.25 284.31
+min: 256.26
+max: 299.33
+ok i guess the molecular weight should range from 250-325 just like it already was then idk
+could technically go 200-325 cuz of how close to 250 that one is, 
+or 250-300 because they're all technically still within that range
+
+
+top 10 logp's:
+
+https://scifinder-n.cas.org/search/all/6862cd46f148860ed17ef37b 2.000±0.00
+https://scifinder-n.cas.org/search/all/6862c9f9f148860ed17ece4a 1.159±0.00
+https://scifinder-n.cas.org/search/all/6862d2b2f148860ed17f2ed0 0.000±0.00
+https://scifinder-n.cas.org/search/all/6862d3f1f148860ed17f3e1a 0.393±0.00
+https://scifinder-n.cas.org/search/all/6862d4c2f148860ed17f479f 1.079±0.00
+https://scifinder-n.cas.org/search/all/6862d4f0f148860ed17f49c7 1.750±0.00
+https://scifinder-n.cas.org/search/all/6862d6b5f148860ed17f5d42 0.761±0.00
+https://scifinder-n.cas.org/search/all/6862d628f148860ed17f56ed 0.379±0.00
+https://scifinder-n.cas.org/search/all/6862d661f148860ed17f598c 1.237±0.00
+https://scifinder-n.cas.org/search/all/6862d670f148860ed17f5a98 0.748±0.00
+
+min: 0.000
+max: 2.000
+why so exact with the sig figs???
+
+ABA:
+264.32 g/mol
+1.725±0.00
+
+https://www.desmos.com/calculator/3llaed40sn
+
+ok final:
+
+LogP (up to): 1, 2, 2.5
+Molecular Weight (up to, Daltons): 200, 250, 300
+Rep: 3D
+React: Clean
+Purch: Wait OK
+pH: Mid
+Charge: -1 0
+
+1,208,416 Protomers
+159 Tranches
+
+
+
+ok then:
+download as:
+AutoDock (*.pdbqt.gz)
+Raw URLs
+
+download to:
+dock/ligands
+
+open file (reformat because I suppose the formatting is outdated between the site and the filesystem)
+ctrl+f
+
+type in "files"
+open find-and-replace and type in "files2"
+click Replace all
+
+type in "http"
+open find-and-replace and type in "https"
+click Replace all
+
+save and close text editor
+
+then either go in the files and drag and drop the zinc file onto DownloadFiles.bat or open dock/ligands in powershell and run:
+./DownloadFiles.bat ZINC-downloader-3D-pdbqt.gz.uri
+if the zinc file name is different then use that instead
+
+get 7zip and
+add "C:\Program Files\7-Zip" to path
+
+e.g. look up 7zip, install the correct one for your windows, run the installer
+and
+windows key, type in environment variables, enter that, 
+press environment variables near the bottom, pick user variables or system variables it doesn't really matter and 
+then click the path under it 
+then press edit in the respective part of the window
+
+windows key
+type in 7zip
+click open file location
+right click on the shortcut and press open file location
+right click on that (i got 7zFM.exe) and click "copy as path"
+
+go back to edit environment variable window
+press new
+paste in what you got earlier, i got "C:\Program Files\7-Zip\7zFM.exe" 
+but remove the last part so it's just "C:\Program Files\7-Zip\7zFM.exe" so you're adding the folder instead of the file
+
+press ok
+press ok
+press ok
+restart terminal to update environment variables
+e.g. close instances of terminal you want updated
+go to dock/ligands folder
+click on empty space inside the folder
+click on "Open in Terminal"
+
+run:
+./UnzipFiles.bat
+or just:
+7z e zipped\*.gz -ounzipped\
+either works if the "zipped" folder exists; you can make it yourself if you want
+
+
+
+cite this
+Forli, S., Huey, R., Pique, M. E., Sanner, M. F., Goodsell, D. S., & Olson, A. J. (2016). Computational protein–ligand docking and virtual drug screening with the AutoDock suite. Nature protocols, 11(5), 905-919.
+
+
+
+nevermind scratch a bunch of the above steps
+run terminal
+run
+pip install requests
+then
+python .\GetLigandsForDocking.py .\ZINC-downloader-3D-pdbqt.gz.uri
+
+
+nevermind forget the whole python thing entirely just do this instead:
+1. download AutoDock (*.pdbqt.gz) Raw URLs
+2. fix in notepad using find and replace http-->https and files-->files2
+3. drag and drop fixed file onto 1DownloadFiles.bat and wait some minutes
+4. double click on 2UnzipFiles.bat
+5. move or copy contents of unzipped folder into dock/ligands
+6. start the program -- go in the main folder and run 
+python dock.py --clear-everything
+
+if you want to stop and continue where you left off, do ctrl+c and then run
+python dock.py
+the program is resistant to bluescreens and other sudden stops that way through its use of a cache system
+
+6. you can just do this right after the ligands are prepared do it when it suddenly stops:
+- stop the program
+- in the main folder, run 
+python checkAtomTypesInCache.py dock/cache --fix
+- you can run it without the "--fix" to have it just check first
+- this will remove atoms such as Si from molecules and replace them with functionally similar atoms
+- you can run 
+restoreatomsfrombackup.py pdbqt_backups dock/cache
+to restore them, probably
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

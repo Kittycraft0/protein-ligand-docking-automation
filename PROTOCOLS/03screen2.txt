@@ -1,0 +1,57 @@
+7/14/2025
+
+now the first docking sequence must be done. follow this protocol to do the second.
+
+now go open dock/results/scores and find the file named scores_[your protein file name].txt
+
+open it up, take a look at the results. if you did a big enough batch then you should have a nice variety of results. we will now decide upon a score range for further screening.
+
+if you want to filter by having scores closest to a target ligand, then find said ligand's score and add and subtract some value to get a nice subset.
+
+if you want the highest, the best binding of them all, then you can like take scores from that of the target ligand up to infinity or some number larger than the max value in the ranked list file, and have the minimum be that of the target ligand, perhaps minus a bit or rounding "down" to the nearest number.
+
+anyways, once you have decided upon a score range to take and run the next batch on,
+
+open D:\Users\iwbmo\Desktop\work\dockingprogram\protein-ligand-docking-automation in command prompt
+it's the file that is the typical directory
+
+run:
+python collect_hits.py dock/results/scores/scores_[your protein file name].txt dock/ligands2 --source_dir dock/results/docked_ligands --score_range [your range here, 2 numbers space separated]
+11/19/2025 THE FILE OR FOLDER MAY BE WRONG. PLEASE CHECK THAT FIRST BEFORE ASSUMING SOMETHING IS WRONG WITH THE SCRIPT. ALSO MAKE SURE YOU ARE NOT COPY PASTING TO MAKE .txt.txt
+could also try
+python collect_hits.py dock/results/scores/top_dockers_KCNH2_7CNOB_DOCK.txt dock/ligands2 --source_dir dock/results/docked_ligands --score_range [your range here, 2 numbers space separated]
+
+
+
+
+ex.:
+python collect_hits.py dock/results/scores/scores_PYR1_3K3K2_DOCK.txt dock/ligands2 --source_dir dock/results/docked_ligands --score_range -20.0 -8.0
+or
+python collect_hits.py "D:\Users\iwbmo\Desktop\work\dockingprogram\protein-ligand-docking-automation\dock\results\scores\scores_KCNH2_7CNOB_DOCK.txt" dock/ligands2 --source_dir dock/results/docked_ligands --score_range -7 10
+
+if it prompts you for the protein name, make sure to type the protein name correctly. for example, if your protein file was named "PYR1_3K3K_DOCK.pdbqt", then enter "PYR1_3K3K_DOCK". otherwise it won't work.
+
+
+now all of those files in the new folder are bundles of all of the different poses. we don't need the poses for those, we just need one. if you run the program as it is then it will try re-docking each one with all 5-20 poses, which will be heavily inefficient and will yield mostly the same results. if you want to improve quality, then turn up the "exhaustiveness" setting in the config.
+
+go to source directory and open console again if you closed it. otherwise just go back to it.
+
+run the following:
+python extract_poses.py dock/ligands2 dock/ligands3
+
+now they shall be renamed because their current naming scheme is quite ugly. skip this step if you like the naming scheme as it is. they will get egregiously long though if you do that.
+
+python rename_result1_poses.py dock/ligands3 dock/ligands4
+
+
+
+now go back do the dock folder. rename "dock/ligands" to "dock/ligands1". rename "dock/ligands4" (or "dock/ligands3" if you skipped the last step) to "dock/ligands". feel free to delete folders ligands1 (newly named), ligands2, and ligands3. they are all not needed anymore. or you can zip them and save them somewhere if you'd like to for some reason.
+
+now go to the proteins folder, and add whatever proteins you want included in the second screening into the direct folder. files in subdirectories are not read. make sure to keep the first protein because the software doesn't save scores on new runs. i personally add just one additional protein to make it 2 in there for my second run to make it generally allowing to hold more to test against while still being less time filling.
+
+now go back to the main directory, open it in console, and run:
+python dock.py --clear-everything
+and wait some days or something again.
+
+
+

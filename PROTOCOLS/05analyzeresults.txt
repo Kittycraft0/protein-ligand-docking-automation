@@ -1,0 +1,50 @@
+7/20/2025
+
+first off, get the ligands into one folder, following the procedure outlines by 04 (or 03 if you've only screened once):
+
+go into main folder, open in terminal,
+
+
+run this or one of the other ones for further filtering:
+python collect_hits.py dock/results/scores/scores_[your protein file name].txt dock/ligands2 --source_dir dock/results/docked_ligands --score_range [your range here, 2 numbers space separated, otherwise use full range]
+
+ex.:
+python collect_hits.py dock/results/scores/scores_PYR1_3K3K2_DOCK.txt dock/ligandsbh1 --source_dir dock/results/docked_ligands --score_range -20.0 20.0
+
+
+run:
+python extract_poses.py dock/ligandsbh1 dock/ligandsbh2
+
+
+run:
+python rename_subsequent_poses.py dock/ligandsbh2 dock/ligandsfinal
+
+
+delete folders dock/ligandsbh1 and dock/ligandsbh2
+
+
+make ligands pictures:
+run:
+python pdbqt_to_image.py dock/ligandsfinal -o dock/ligandsfinalimages
+
+
+see score files in dock/results and dock/results/scores figure out what you want to look more into
+find its associated image file
+go to a website like scifinder-n.cas.org or similar
+log in if you have to
+on the right of the search bar, click Draw
+draw your molecule from your image
+(you can double click on the image in the image viewer on windows 11 to make the molecule image fit the window)
+try to search for it
+
+if searching doesn't work: open associated .pdbqt file in chimerax and be more specific/accurate with the protruding and recessed bonds, then try again
+
+
+
+
+
+
+
+
+
+

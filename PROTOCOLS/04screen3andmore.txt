@@ -1,0 +1,95 @@
+7/17/2025
+
+written with help of ai cuz i'm lazy, but obviously i'm testing it myself
+
+except also written by myself in part
+
+rename dock/ligands to dock/ligands0
+
+if you want the union of multiple top scores datasets then just run the script multiple times
+otherwise if you want the intersection of datasets like i do now then put multiple files as extra parameters into the ... file
+
+11/22/2025
+if you want the ligands that give you the best closeness scores to that of the original molecule:
+	python get_closest_substitutes.py 0.5 ./dock/ligandsh1
+	rename dock/ligandsh1 to dock/ligands, given you already renamed the last one out of that name
+	then just rearrange what proteins you want to screen for in dock/proteins
+	then archive your results dir if you want
+	then make sure you look at any ligands not following the naming scheme, 
+	and make sure said files aren't files containing more than one ligand file
+	then run python dock.py --clear-everything
+	and wait some days or something idk
+	(end of helper file if you took this path)
+
+intersection (like the mathematical operator on sets) of highest scores:
+go into main folder
+open in terminal
+run:
+python intersect_hits.py --output-mode directory -o dock/ligandsh1 --input dock/results/scores/scores_PYR1_3K3K2_DOCK.txt s -20.0 -9.0 --input dock/results/scores/scores_PYL2_3KDI2_DOCK.txt s -20.0 -9.0
+
+python intersection_hits.py [output_path] --output-mode [mode] --source-dir [source_folder] (--input [score_file] [s min max | n N])+
+
+(see more info on what the above means and how to use it at the bottom of this file)
+
+or similar. 
+add
+--input dock/scores_[dockproteinname].txt -s [lower bound inclusive] [upper bound inclusive] for all score files you want to look at.
+
+
+and then remember
+next step
+change from bundles of model files to individuals
+in main directory,
+run:
+python extract_poses.py dock/ligandsh1 dock/ligandsh2
+
+
+and now
+rename
+in main directory,
+run:
+python rename_subsequent_poses.py dock/ligandsh2 dock/ligands
+
+and now
+remove the directories dock/ligandsh1 and dock/ligandsh2, or archive them if you want.
+
+
+
+
+
+
+
+
+
+
+python intersection_hits.py -o [output_path] --output-mode [mode] --source-dir [source_folder] (--input [score_file] [s min max | n N])+
+
+
+python intersect_hits.py -h
+usage: intersect_hits.py [-h] -o OUTPUT_PATH [--output-mode {file,directory}] [--source-dir SOURCE_DIR] --input FILE
+                         FILTER VAL(S) [FILE FILTER VAL(S) ...]
+
+Finds intersecting ligands from multiple score files and either lists them or copies their PDBQT files.
+
+options:
+  -h, --help            show this help message and exit
+  -o OUTPUT_PATH, --output OUTPUT_PATH
+                        Path for the output. A file path for 'file' mode, a directory path for 'directory' mode.
+  --output-mode {file,directory}
+                        Choose output type: 'file' (default) creates a text list of ligand names. 'directory' copies PDBQT files.
+  --source-dir SOURCE_DIR
+                        [Required for 'directory' mode] The source directory of all docked PDBQT files.
+  --input FILE FILTER VAL(S) [FILE FILTER VAL(S) ...]
+                        Define an input file and its filter. Can be used multiple times.
+                          Filter types:
+                            n N:         Select top N ligands.
+                            s MIN MAX:   Select ligands with scores between MIN and MAX.
+
+Example Usage:
+  # Output a TEXT FILE with names of intersecting ligands
+  python intersect_hits.py -o "dock/results/intersection.txt" --output-mode file --input file1.txt n 10000 --input file2.txt n 5000
+
+  # Copy intersecting ligand PDBQT FILES to a new directory
+  python intersect_hits.py -o "dock/results/intersecting_hits" --output-mode directory --source-dir "dock/results/docked_ligands" --input file1.txt s -12.0 -10.5 --input file2.txt s -11.0 -9.5
+
+
