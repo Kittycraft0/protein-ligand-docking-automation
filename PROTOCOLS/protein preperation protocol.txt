@@ -1,0 +1,155 @@
+6/6/2025
+for troubleshooting things like metal atoms and Se atoms ONLY: https://eagonlab.github.io/Protein_PDBQT_Protocol.pdf
+
+analysis:
+measure center ligand [note down center]
+
+look at binding box and get vina stuffs:
+runscript "D:\Users\iwbmo\Desktop\work\get_bbox.py"
+(i love that it's so amazing)
+to close:
+close #2,3
+or
+close #2-3
+or idk lol just put numbers in there and include at least 2 and 3, or whatever numbers are the model numbers on the bottom right box of the screen
+
+rainbow chains:
+rainbow chains
+or
+color bychain
+
+
+
+cleanup:
+del solvent
+sel ligand [visually confirm correctness]
+del sel
+[delete unwanted ligands and protein chains]
+[addh or dockprep, better chocie is:]
+dockprep
+
+then save as pdb
+then run like
+obabel foo.pdb -o pdbqt -O foo.pdbqt -xr
+obabel foo.pdb -o pdbqt -O foo.pdbqt -p 7.4 -xr
+obabel foo.pdb -O foo.pdbqt -xr -p 7.4 --partialcharge eem
+(put in the appropriate names ofc)
+
+
+don't do:
+select zone ligand 20 extend true
+del ~sel
+
+
+
+
+:)
+.
+
+
+sel ~sel
+delete sel
+
+
+
+
+
+
+
+view:
+open dock/proteins/PYR1_3K3K_DOCK.pdbqt [put in file path]
+open dock/results/docked_ligands/docked_AM1/AM1_in_PYR1_3K3K_DOCK.pdbqt [put in file path]
+
+# Show only the first docked pose of the ligand (model #2.1)
+show #2.1
+hide #2.2-10
+
+# Style the protein as a nice cartoon and the ligand as sticks
+cartoon #1
+style #2.1 stick
+
+# Color the ligand's carbons cyan to make it pop
+color #2.1 & C cyan
+
+
+
+
+# --- Visualization Script (Corrected Version) ---
+# --- Start of User Configuration ---
+
+# 1. Set the path to your protein file
+# Example: open D:\Path\To\dock\proteins\PYR1_3K3K_DOCK.pdbqt
+open [PATH_TO_YOUR_PROTEIN.PDBQT]
+
+# 2. Set the path to your docked ligand result file
+# Example: open D:\Path\To\dock\results\docked_ligands\docked_AM1\AM1_in_PYR1_3K3K_DOCK.pdbqt
+open [PATH_TO_YOUR_DOCKED_LIGAND.PDBQT]
+
+# --- End of User Configuration ---
+
+
+# --- Automation Steps (no need to edit below) ---
+
+# Hide all but the first docked pose (model #1 is protein, #2 is ligand)
+hide #2.2-10
+show #2.1
+
+# Apply initial styles
+cartoon #1
+color #1 & C gray
+#style #2.1 ball
+color #2.1 & C cyan
+
+# Find and select the binding site residues (using a 4.0 Angstrom cutoff)
+select zone #2.1 4.0 #1&protein residues true
+
+# Style the binding site using the current selection ('sel')
+show sel
+style sel stick
+color sel & C gold
+
+# Find and show hydrogen bonds between the ligand and the now-visible binding site
+hbonds #2.1 restrict sel reveal true
+
+# Focus the camera and clean up the view
+view sel
+~select
+
+
+# --- Optional Surface Visualization (uncomment lines below to use) ---
+# This version uses the corrected, documented commands.
+#
+# surface #1
+# transparency #1 70 surfaces
+### OPTIONAL!? IT REMOVES SOME: 
+### clip front 0 position sel
+# change the -5 to whatever:
+# clip front -5 position #2.1
+# view sel
+### remove fog:
+# view sel clip false
+#
+# --------------------------------------------------------------------
+
+
+
+# --- Optional Surface Visualization: Cutaway View (uncomment to use) ---
+#
+# surface #1
+# transparency #1 70 surfaces
+# clip front -5 position #2.1
+# view #2.1 clip false
+#
+# --------------------------------------------------------------------
+
+
+# --- Optional Surface Visualization: Immersive Inside View (uncomment to use) ---
+#
+# surface #1
+# lighting flat
+# transparency #1 50 surfaces
+# view #2.1 clip false
+# clip near 0.1
+#
+# -------------------------------------------------------------------------
+

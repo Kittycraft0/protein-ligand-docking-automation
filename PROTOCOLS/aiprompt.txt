@@ -1,0 +1,79 @@
+# 10/14/2025
+(inputted into Gemini 2.5 Pro)
+(script requires openbabel to be installed and the obabel command is available in your system's PATH,
+  and for vina_split.exe to be located in "C:\Program Files (x86)\The Scripps Research Institute\Vina\vina_split.exe")
+
+create a python file to read top 100 ligands from list and copy their associated folders into a top-100 folder, then creating images of them and putting them into the top100images folder:
+
+open text file results-7-20-2025-run2trial3/results/scores/best_ligands_overall.txt
+let top_results be a list of 100 objects:
+skip lines if they start with '#', reading 100 lines after that:
+	if the line says "-10.4 DDABMN.xaa_1442_model_1", then
+	let score=-10.4
+	let name=DDABMN.xaa_1442_model_1
+	let rank=number of iterations that have gone past so far, making sure that when stringified it has 0's until its value, e.g. if rank goes up to 100 max, then the 13th rank should be stringified to 013, and the 6th rank should be stringified to 006.
+
+for name in top_results:
+
+	copy all files of form
+	f"results-7-20-2025-run2trial3/results/docked_ligands/docked_{cutname1}/docked_{namecutname2}/{name}*"
+	and
+    f"results-7-20-2025-run2trial3/results/docked_ligands/docked_{cutname3}/*"
+	where cutname1 is BCABMN if name=BCABMN.xaa_0698_model_1
+	where cutname2 is BCABMN_model1 if name=BCABMN.xaa_0698_model_1
+    where cutname3 is BCABMN.xaa_0698 if name=BCABMN.xaa_0698_model_1
+	where the * picks everything available after that
+
+	copied over to new folder named
+	f"top100/{rank} {score} {name}"
+
+
+create folder top100images if it does not exist
+
+for name in top_results:
+	let pdbqt_file be a file in f"top100/{score} {name}" such that its name ends with the string ".pdbqt"
+
+    copy the f"top100/{score} {name}/{pdbqt_file}" file to a new "temp/" folder at f"temp/{pdbqt_file}", remembering to delete it after program ends
+    
+    (P., Priyamvada. (2024). Re: How do I split my Autodock Vina pdbqt file into indiviadual comformation files on windows?. Retrieved from: https://www.researchgate.net/post/How_do_I_split_my_Autodock_Vina_pdbqt_file_into_indiviadual_comformation_files_on_windows/6625ffd27dee947b4c053338/citation/download. )
+    use: "C:\Program Files (x86)\The Scripps Research Institute\Vina\vina_split.exe" --input output_outfile.pdbqt
+    run f"\"C:\Program Files (x86)\The Scripps Research Institute\Vina\vina_split.exe\" --input temp/{pdbqt_file}"
+    let pdbqt_single_file=one of the new, generated files that end with .pdbqt that is not equal to {pdbqt_file}
+
+
+
+	let image_name be "006 -7.3 CCEBRN0725" if name is "CCEBRN.xaa_0725_model_1" and score is -7.3 and rank is 6, e.g. follow that formatting
+	run this command: f"obabel .\temp\{pdbqt_file} -o png -O {image_name}.png"
+	(ex: obabel .\CCEBRN.xaa_model_0725.pdbqt -o png -O 006 -7.3 CCEBRN0725.png)
+
+    clear the "temp/" folder
+
+delete the "temp/" folder
+
+
+>  Is the rule that the cutname is always the part of the ligand name before the first dot (e.g., DFCBMM)?
+yes
+
+> Is the general rule to take the text before .xaa_ and append the numbers after _model_? What should happen if the name doesn't follow this exact pattern?
+yes; if it doesn't happen to follow that exact pattern then stop the program in error and say what was expected and what was gotten
+
+> Zero .pdbqt files in a folder?
+say 0 pdbqt files in the specific folder, giving the folder name and other relevant information, and error program stopping execution
+
+> More than one .pdbqt file in a folder?
+just take one; they're all the same molecule in different orientations so i don't think it really matters. take the "first" one? just take one of them idk.
+
+ensure that a folder exists before opening it--if it does not exist, then error the program. if it does exist, and the program errors, then log how many files were in the folder, and log the names of the files in the folder.
+
+all errors should terminate program execution. there shouldn't be any warnings--they should terminate program execution. include index or rank
+
+remember the cutname variables and name and how the files are set up
+
+say how many files were copied for each of the 100 folders
+
+remember to 0 pad images
+
+make the 100 number actually a parameter to run the script, assume it's 100 if it's not provided, but otherwise if it's say 234, then have it use 234 as the N instead of 100
+
+ask me any questions if you need to instead of assuming answers when writing the program. if you have any questions, don't write the program, and instead ask me the questions and get clarification before writing the program.
+
