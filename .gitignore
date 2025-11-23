@@ -6,7 +6,7 @@ dock/cache/
 dock/cache/progress_cache.txt
 dock-6-25-2025/
 dock-6-25-2025.zip
-dock/cache
+dock/cache/
 dock.7z
 pdbqt_backups/
 first-top-13-bet-ligands-7-3-2025/
@@ -18,3 +18,5 @@ dock/ligands1/
 dock/ligands2/
 dock/ligands3/
 dock/ligands0/
+top_hits_PYR1/
+top_hits_PYR1_single_pose/
