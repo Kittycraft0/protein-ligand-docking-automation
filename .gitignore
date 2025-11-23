@@ -1,5 +1,5 @@
 # Ignore dock, test1, and vina_split_test folders
-dock/
+
 test1/
 vina_split_test/
 dock/cache/
@@ -21,3 +21,16 @@ dock/ligands0/
 top_hits_PYR1/
 top_hits_PYR1_single_pose/
 vina_split_test/
+dock/what/
+dock/results/
+dock/results-7-8-2025.zip
+dock/results-7-14-2025-run2trial1.zip
+dock/results-7-17-2025-run2trial2.zip
+dock/results-7-20-2025-run2trial3.zip
+dock/results-7-24-2025-run2trial4.zip
+dock/results-11-19-2025.zip
+dock/results-11-22-2025.zip
+dock/log/
+dock/cache/
+"dock/9-25-2025 all the files/"
+dock/ligands/
