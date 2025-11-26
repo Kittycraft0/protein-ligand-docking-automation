@@ -246,26 +246,38 @@ def main():
         folder1 = f"docked_{pdb_code}"
         model_suffix = get_model_suffix(name)
         folder2 = f"{folder1}{model_suffix}"
+        log(f"pdb_code: {pdb_code} folder1: {folder1} folder2: {folder2} model_suffix: {model_suffix}", category="path_details0")
         
-        target_folder = os.path.join(DOCK_BASE_DIR, folder1, folder2)
+        target_folder1 = os.path.join(DOCK_BASE_DIR, folder1, folder2)
+        target_folder2 = os.path.join(DOCK_BASE_DIR, folder1)
         
         # Combine path details into one log to count it as one "event"
         path_msg = (f"Path construction details:\n"
                     f"  1. PDB Code: '{pdb_code}'\n"
                     f"  2. Folder 1: '{folder1}'\n"
                     f"  3. Folder 2: '{folder2}'\n"
-                    f"  4. Full Search Path: '{os.path.abspath(target_folder)}'")
+                    f"  4. Full Search Path 1: '{os.path.abspath(target_folder1)}'"
+                    f"  4. Full Search Path 2: '{os.path.abspath(target_folder2)}'")
         log(path_msg, category="path_details")
 
         # Find the .pdbqt file
         found_file_path = None
-        if os.path.exists(target_folder):
-            files_in_dir = os.listdir(target_folder)
+        if os.path.exists(target_folder1):
+            files_in_dir = os.listdir(target_folder1)
             # log(f"  Files found in folder: {files_in_dir}") # Uncomment if you suspect file naming issues
             
             for file in files_in_dir:
                 if file.startswith(name) and file.endswith(".pdbqt") and not file.endswith(".log"):
-                    found_file_path = os.path.join(target_folder, file)
+                    found_file_path = os.path.join(target_folder1, file)
+                    log(f"  MATCH FOUND: {file}", category="match_found")
+                    break
+        elif os.path.exists(target_folder2):
+            files_in_dir = os.listdir(target_folder2)
+            # log(f"  Files found in folder: {files_in_dir}") # Uncomment if you suspect file naming issues
+            
+            for file in files_in_dir:
+                if file.startswith(name) and file.endswith(".pdbqt") and not file.endswith(".log"):
+                    found_file_path = os.path.join(target_folder2, file)
                     log(f"  MATCH FOUND: {file}", category="match_found")
                     break
         else:
