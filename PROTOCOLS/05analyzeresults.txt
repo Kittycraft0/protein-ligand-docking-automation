@@ -26,6 +26,8 @@ delete folders dock/ligandsbh1 and dock/ligandsbh2
 make ligands pictures:
 run:
 python pdbqt_to_image.py dock/ligandsfinal -o dock/ligandsfinalimages
+or run (similar to):
+python get_top_n_images_better.py -d "top_100_ligands_trial_3_ABA_similar" -s "dock/results/ranked_best_ligands.txt" -n 100 -o "trial_3_ABA_similar_images_files"
 
 
 see score files in dock/results and dock/results/scores figure out what you want to look more into

@@ -1,0 +1,130 @@
+3/29/2026
+
+plan:
+for every pdbqt file in the results folder:
+- convert it to smiles
+- put it in a new folder called results-smiles
+compile a final .txt document of each molecule converted to smiles separated by line breaks
+so i can put the final copy paste into molport
+
+make it a python script
+
+
+how to use script:
+put results folder in
+open the script and change the parameters
+run the script
+
+new plan:
+get a list of zinc ids by recursively looking through the files
+run:
+python .\resultstozincnamelist.py .\results-12-12-2025-run3trial4\
+(or similar)
+and then it should output to zinc_ids_extracted.txt
+
+
+you could do it using python api or you can use it using the zinc web interface:
+
+to use the zinc web interface:
+run:
+python .\format_for_zinc_web.py
+
+Getting SMILES list to put into vendor websites:
+to use the python api to get a SMILES list:
+python zinc_fast_fetch.py zinc_ids_extracted.txt final_smiles.txt
+then it should output to
+"final_smiles.txt"
+
+ZINC Database through web interface: (TOO SLOW, GIVES WEB ERROR)
+go to https://zinc.docking.org/substances/home/
+copy paste "final_smiles.txt" content into One Identifier per Line 
+under "Subsets to Check" dropdown select "All Subsets"
+under "Results Output Format" dropdown select "Summary Table"
+press "Search Many"
+zinc might not show anything
+
+ZINC Database through terminal: (DOESN'T OUTPUT PRICING, JUST AVAILABILITY)
+run:
+python .\zinc_catalog_fetch.py
+this will take a few minutes (30+ seconds per 100 molecules i think) (it takes a while so cloudflare doesn't boot the script out)
+it should output to "zinc_catalogs.tsv", which you can open in any spreadsheet app maybe
+
+Molport:
+open the file, copy paste or upload "final_smiles.txt" into:
+https://www.molport.com/shop/swl-step-1
+under "Enter a List of Molport ID's or SMILES"
+enter info about what you want
+press search
+for "Compounds Review results, make final adjustments, and prepare your selection before downloading a quote or placing an order." select "Available and Selected"
+turn on Show Structure Images if you want
+scroll to the bottom
+press "download selected and not selected items"
+it will be saved as "Quote_GLPC29W5838864.xls" or something like that
+i would suggest to rename it to have a prefix of molport- just for organization purposes, e.g.:
+"molport-Quote_GLPC29W5838864.xls"
+
+Chemspace:
+copy paste list "final_smiles.txt" into 
+https://chem-space.com/search
+it takes about a minute to load once you press search but it's very nice!!!
+click "Export to file" (little gray dropdown at top), select "Text / CSV"
+it might be too big for download and will have to be sent through email, just fill out your information and do that. make sure to check your spam. it can take like 5-10 minutes to go through.
+it will be saved as something like "chemspace-search-filtered-20260329210603.csv".
+
+mcule: (NO PRICING AVAILABLE SO DON'T)
+paste or upload "final_smiles.txt" into:
+https://mcule.com/search/multi/
+press search
+press get quote on top right
+put your information in
+you can get a quote eventually ig then within a couple days or so it says anyways
+
+eMolecules: (NO PRICING AVAILABLE SO DON'T)
+go to: https://search.emolecules.com/
+create an account to see prices
+do know that you can only see the prices for 90 days until the trial search account expires
+paste or upload "final_smiles.txt" into:
+https://search.emolecules.com/
+select SMILES as type
+press search
+press Columns on top right ish
+select all the boxes
+press save column selection
+press export
+select excel spreadsheet
+leave rows
+select "Use depictions for SMILES"
+download
+it should save as like "emoleculeslist.xls" or something
+nvm they're not giving prices so ignore that
+
+
+
+.
+.
+.
+
+
+
+3/30/2026:
+to output to a pdf or website thing for easier viewing:
+what we want:
+One box containing the following in top down order as formatted here for all molecules in list or for all molecules in list with price below certain threshold:
+[
+[picture]
+Zinc ID: [zinc id]
+
+Score: [score]
+Price: [price per gram]$/g
+]
+
+we want this 3 times--one for high scores, one for scores similar towards that of ABA, and one for scores lower than ABA.
+
+How to output for an individual, as this document is only doing it for one at a time:
+
+sorting the pricing:
+run:
+python merge_pricing.py
+python build_dashboard.py
+or:
+python build_dashboard.py --max_price [max price]

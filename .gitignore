@@ -37,3 +37,7 @@ dock/ligands/
 dock/cache/ligandNames.txt
 dock/cache/progress_cache.txt
 dock/cache/proteinNames.txt
+dock/ligandsb1/
+other databases/otherdatabases/results-12-12-2025-run3trial4/
+other databases/otherdatabases/results-12-12-2025-run3trial4-smiles/
+other databases/molport/Molport_Full_Database/

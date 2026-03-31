@@ -1,2 +1,13 @@
-dock\proteins\1stp_DOCK.pdbqt
-dock\proteins\3k3k_DOCK.pdbqt
+dock\proteins\PYL1_3JRS2-1_DOCK.pdbqt
+dock\proteins\PYL1_3JRS2-2_DOCK.pdbqt
+dock\proteins\PYL1_3JRS2-3_DOCK.pdbqt
+dock\proteins\PYL2_3KDI2_DOCK.pdbqt
+dock\proteins\PYL2_4LG52_DOCK.pdbqt
+dock\proteins\PYL2_4LGA2_DOCK.pdbqt
+dock\proteins\PYL2_4LGB2_DOCK.pdbqt
+dock\proteins\PYL3_4DS82_DOCK.pdbqt
+dock\proteins\PYL3_4DSC2-1_DOCK.pdbqt
+dock\proteins\PYL3_4DSC2-2_DOCK.pdbqt
+dock\proteins\PYL5_4JDL2_DOCK.pdbqt
+dock\proteins\PYR1_3K3K2_DOCK.pdbqt
+dock\proteins\PYR1_3QN12_DOCK.pdbqt
