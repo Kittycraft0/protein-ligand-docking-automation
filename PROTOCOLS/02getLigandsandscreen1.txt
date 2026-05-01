@@ -76,22 +76,26 @@ Raw URLs
 download to:
 dock/ligands
 
-open file (reformat because I suppose the formatting is outdated between the site and the filesystem)
+disregard the following with the - in front of it, as it appears that zinc has fixed their issue:
+- open file (in like notepad or vscode or some other text editor) (reformat because I suppose the formatting is outdated between the site and the filesystem)
 ctrl+f
 
-type in "files"
-open find-and-replace and type in "files2"
-click Replace all
+- type in "files"
+- open find-and-replace and type in "files2"
+- click Replace all
 
-type in "http"
-open find-and-replace and type in "https"
-click Replace all
+- type in "http"
+- open find-and-replace and type in "https"
+- click Replace all
 
-save and close text editor
+- save and close text editor
 
 then either go in the files and drag and drop the zinc file onto DownloadFiles.bat or open dock/ligands in powershell and run:
 ./DownloadFiles.bat ZINC-downloader-3D-pdbqt.gz.uri
-if the zinc file name is different then use that instead
+or if the file is not there, run:
+Get-Content ZINC-downloader-3D-pdbqt.gz.uri | ForEach-Object { Invoke-WebRequest $_ -OutFile $(Split-Path $_ -Leaf) }
+(wait a while)
+for both, if the zinc file name is different then use that instead
 
 get 7zip and
 add "C:\Program Files\7-Zip" to path
@@ -128,7 +132,8 @@ run:
 or just:
 7z e zipped\*.gz -ounzipped\
 either works if the "zipped" folder exists; you can make it yourself if you want
-
+nevermind do this instead:
+7z e "*.gz" "-o.\unzipped"
 
 
 cite this
@@ -136,19 +141,19 @@ Forli, S., Huey, R., Pique, M. E., Sanner, M. F., Goodsell, D. S., & Olson, A. J
 
 
 
-nevermind scratch a bunch of the above steps
-run terminal
-run
-pip install requests
-then
-python .\GetLigandsForDocking.py .\ZINC-downloader-3D-pdbqt.gz.uri
+- nevermind scratch a bunch of the above steps
+- run terminal
+- run
+- pip install requests
+- then
+- python .\GetLigandsForDocking.py .\ZINC-downloader-3D-pdbqt.gz.uri
 
 
 nevermind forget the whole python thing entirely just do this instead:
 1. download AutoDock (*.pdbqt.gz) Raw URLs
-2. fix in notepad using find and replace http-->https and files-->files2
-3. drag and drop fixed file onto 1DownloadFiles.bat and wait some minutes
-4. double click on 2UnzipFiles.bat
+- 2. fix in notepad using find and replace http-->https and files-->files2
+- 3. drag and drop fixed file onto 1DownloadFiles.bat and wait some minutes
+- 4. double click on 2UnzipFiles.bat
 5. move or copy contents of unzipped folder into dock/ligands
 6. start the program -- go in the main folder and run 
 python dock.py --clear-everything
