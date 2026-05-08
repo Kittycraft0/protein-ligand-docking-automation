@@ -47,3 +47,6 @@ filterbypricefirst/unzipped
 filterbypricefirst/zipped source initial files
 something
 dock/zinc_id_ligands
+dock/upload_ready_smiles.txt
+dock/initial_zinc_smiles_fill_list.txt
+dock/smiles_chunks
